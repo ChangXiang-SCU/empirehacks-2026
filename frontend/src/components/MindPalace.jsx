@@ -16,6 +16,16 @@ export default function MindPalace() {
   const isPanningRef = useRef(false)
   const panStartRef = useRef({ x: 0, y: 0, tx: 0, ty: 0 })
   const dragRef = useRef(null)
+  const [expandedNodes, setExpandedNodes] = useState(new Set())
+
+  const toggleExpand = useCallback((nodeId) => {
+    setExpandedNodes((prev) => {
+      const next = new Set(prev)
+      if (next.has(nodeId)) next.delete(nodeId)
+      else next.add(nodeId)
+      return next
+    })
+  }, [])
 
   const nodes = useGraphStore((state) => state.getVisibleNodes())
   const connections = useGraphStore((state) => state.getVisibleConnections())
@@ -23,13 +33,11 @@ export default function MindPalace() {
   const selectedNodeId = useGraphStore((state) => state.selectedNodeId)
   const selectNode = useGraphStore((state) => state.selectNode)
 
-  // Layout engine: positions nodes in DIKW columns (left→right)
   const computeLayout = useCallback(() => {
     if (nodes.length === 0) { setPositions({}); return }
 
     const cWidth = containerRef.current?.clientWidth || 1200
     const cHeight = containerRef.current?.clientHeight || 800
-    // Use a larger virtual canvas so nodes have room to spread
     const layoutW = Math.max(cWidth, 1600)
     const layoutH = Math.max(cHeight, 1200)
 
@@ -47,9 +55,7 @@ export default function MindPalace() {
       )
       .force('charge', d3.forceManyBody().strength(-800))
       .force('collision', d3.forceCollide().radius(100))
-      // DIKW column positioning: D→I→K→W left to right
       .force('x', d3.forceX((d) => layoutW * (DIKW_COLUMN[d.type] || 0.5)).strength(0.7))
-      // Spread vertically within each column
       .force('y', d3.forceY(layoutH / 2).strength(0.03))
       .stop()
 
@@ -61,7 +67,6 @@ export default function MindPalace() {
     })
     setPositions(pos)
 
-    // Auto-fit: compute bounding box and zoom/pan to fit all nodes
     const xs = simNodes.map((n) => n.x)
     const ys = simNodes.map((n) => n.y)
     const minX = Math.min(...xs) - 40
@@ -72,18 +77,14 @@ export default function MindPalace() {
     const bboxH = maxY - minY
     const scaleX = cWidth / bboxW
     const scaleY = cHeight / bboxH
-    const k = Math.min(scaleX, scaleY, 1) * 0.92 // 92% to leave padding
+    const k = Math.min(scaleX, scaleY, 1) * 0.92
     const fitX = (cWidth - bboxW * k) / 2 - minX * k
     const fitY = (cHeight - bboxH * k) / 2 - minY * k
     setTransform({ x: fitX, y: fitY, k })
   }, [nodes, connections])
 
-  // Initial layout
-  useEffect(() => {
-    computeLayout()
-  }, [computeLayout])
+  useEffect(() => { computeLayout() }, [computeLayout])
 
-  // Wheel zoom (needs non-passive listener for preventDefault)
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -106,23 +107,19 @@ export default function MindPalace() {
     return () => el.removeEventListener('wheel', handler)
   }, [])
 
-  // Pan start
   const handleMouseDown = useCallback(
     (e) => {
       if (e.target.closest('.mind-node')) return
       isPanningRef.current = true
       panStartRef.current = {
-        x: e.clientX,
-        y: e.clientY,
-        tx: transform.x,
-        ty: transform.y,
+        x: e.clientX, y: e.clientY,
+        tx: transform.x, ty: transform.y,
       }
       if (containerRef.current) containerRef.current.style.cursor = 'grabbing'
     },
     [transform]
   )
 
-  // Mouse move: drag node or pan
   const handleMouseMove = useCallback(
     (e) => {
       if (dragRef.current) {
@@ -148,14 +145,12 @@ export default function MindPalace() {
     [transform.k]
   )
 
-  // Mouse up
   const handleMouseUp = useCallback(() => {
     isPanningRef.current = false
     dragRef.current = null
     if (containerRef.current) containerRef.current.style.cursor = 'grab'
   }, [])
 
-  // Node drag start
   const handleNodeMouseDown = useCallback(
     (e, nodeId) => {
       e.stopPropagation()
@@ -165,33 +160,36 @@ export default function MindPalace() {
         startX: e.clientX,
         startY: e.clientY,
         startPos: { ...positions[nodeId] },
+        hasMoved: false,
       }
     },
     [positions, selectNode]
   )
 
-  // Render bezier connection path
+  const handleNodeDoubleClick = useCallback(
+    (e, nodeId) => {
+      e.stopPropagation()
+      toggleExpand(nodeId)
+    },
+    [toggleExpand]
+  )
+
   const renderConnection = (conn) => {
     const fromPos = positions[conn.fromNodeId]
     const toPos = positions[conn.toNodeId]
     if (!fromPos || !toPos) return null
-
     const fromNode = nodes.find((n) => n.id === conn.fromNodeId)
     const toNode = nodes.find((n) => n.id === conn.toNodeId)
-
-    // Right-center of source → left-center of target
     const fx = fromPos.x + NODE_WIDTH
     const fy = fromPos.y + NODE_HEIGHT_EST / 2
     const tx = toPos.x
     const ty = toPos.y + NODE_HEIGHT_EST / 2
     const midX = (fx + tx) / 2
-
     let color = '#444'
     if (fromNode?.type === 'K' || toNode?.type === 'K') color = '#f57c00'
     if (fromNode?.type === 'W' || toNode?.type === 'W') color = '#e53935'
     const isCross = fromNode?.projectId !== toNode?.projectId
     if (isCross) color = '#667eea'
-
     return (
       <path
         key={conn.id}
@@ -205,7 +203,6 @@ export default function MindPalace() {
     )
   }
 
-  // Get project for a node
   const getProject = (node) => {
     return (
       projects.find((p) => p.id === node.projectId) || {
@@ -224,7 +221,6 @@ export default function MindPalace() {
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
     >
-      {/* Dot grid background */}
       <div
         className="grid-bg"
         style={{
@@ -232,7 +228,6 @@ export default function MindPalace() {
         }}
       />
 
-      {/* Pannable / zoomable canvas */}
       <div
         className="canvas"
         style={{
@@ -240,54 +235,63 @@ export default function MindPalace() {
           transformOrigin: '0 0',
         }}
       >
-        {/* SVG connection lines */}
         <svg className="connections-svg">
           {connections.map((c) => renderConnection(c))}
         </svg>
 
-        {/* Node cards */}
         {nodes.map((node) => {
           const pos = positions[node.id]
           if (!pos) return null
           const project = getProject(node)
           const isSelected = selectedNodeId === node.id
           const typeKey = node.type?.toLowerCase() || 'd'
+          const isExpanded = expandedNodes.has(node.id)
 
           return (
             <div
               key={node.id}
               className={`mind-node ${typeKey}-node ${isSelected ? 'selected' : ''} ${
                 node.sharedProjects?.length ? 'shared' : ''
-              }`}
+              } ${isExpanded ? 'expanded' : 'collapsed'}`}
               style={{ left: pos.x, top: pos.y }}
               onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+              onDoubleClick={(e) => handleNodeDoubleClick(e, node.id)}
             >
               <div className="mind-node-header">
                 <span className="mind-node-type">
                   {TYPE_ICONS[node.type]} {getLabelByType(node.type)}
                 </span>
+                {!isExpanded && (
+                  <span className="mind-node-preview">
+                    {node.content?.slice(0, 30)}{node.content?.length > 30 ? '…' : ''}
+                  </span>
+                )}
                 <span className={`mind-node-project ${typeKey}-project`}>
                   {project.name}
                 </span>
+                <span className="mind-node-toggle">
+                  {isExpanded ? '▾' : '▸'}
+                </span>
               </div>
-              <div className="mind-node-body">
-                <div className="mind-node-content">{node.content}</div>
-                {node.tags && node.tags.length > 0 && (
-                  <div className="mind-node-tags">
-                    {node.tags.map((tag, i) => (
-                      <span key={i} className="mind-node-tag">
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {isExpanded && (
+                <div className="mind-node-body">
+                  <div className="mind-node-content">{node.content}</div>
+                  {node.tags && node.tags.length > 0 && (
+                    <div className="mind-node-tags">
+                      {node.tags.map((tag, i) => (
+                        <span key={i} className="mind-node-tag">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )
         })}
       </div>
 
-      {/* Zoom controls */}
       <div className="zoom-controls">
         <button className="zoom-btn auto-layout-btn" onClick={computeLayout}>
           ⚡ Auto Layout

@@ -57,10 +57,22 @@
   border-radius: 12px;
   cursor: grab;
   z-index: 5;
-  transition: box-shadow 0.2s;
+  transition: box-shadow 0.2s, max-width 0.2s;
   user-select: none;
-  min-width: 140px;
+  min-width: 100px;
   max-width: 200px;
+}
+
+.mind-node.collapsed {
+  max-width: 200px;
+}
+
+.mind-node.collapsed .mind-node-header {
+  border-radius: 12px;
+}
+
+.mind-node.expanded {
+  max-width: 240px;
 }
 
 .mind-node:hover {
@@ -101,6 +113,29 @@
   border-radius: 3px;
   margin-left: auto;
   white-space: nowrap;
+}
+
+.mind-node-toggle {
+  font-size: 10px;
+  opacity: 0.5;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.mind-node-preview {
+  font-size: 9px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.7;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.collapsed .mind-node-project {
+  display: none;
 }
 
 /* Node body */
