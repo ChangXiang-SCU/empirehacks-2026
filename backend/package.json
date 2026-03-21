@@ -1,0 +1,22 @@
+{
+  "name": "mnemosyne-backend",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch server.js",
+    "start": "node server.js",
+    "db:init": "node scripts/init-db.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.15.0",
+    "better-sqlite3": "^9.2.2",
+    "multer": "^1.4.5-lts.1",
+    "chokidar": "^3.6.0",
+    "uuid": "^9.0.1",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
