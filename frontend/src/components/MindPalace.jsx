@@ -7,6 +7,7 @@ import './MindPalace.css'
 const TYPE_ICONS = { D: '📊', I: '📋', K: '💡', W: '🔮' }
 const NODE_WIDTH = 180
 const NODE_HEIGHT_EST = 90
+const DIKW_COLUMN = { D: 0.12, I: 0.36, K: 0.62, W: 0.88 }
 
 export default function MindPalace() {
   const containerRef = useRef(null)
@@ -22,12 +23,15 @@ export default function MindPalace() {
   const selectedNodeId = useGraphStore((state) => state.selectedNodeId)
   const selectNode = useGraphStore((state) => state.selectNode)
 
-  // Compute layout with D3 force simulation (synchronous, no animation jank)
-  useEffect(() => {
+  // Layout engine: positions nodes in DIKW columns (left→right)
+  const computeLayout = useCallback(() => {
     if (nodes.length === 0) { setPositions({}); return }
 
-    const width = containerRef.current?.clientWidth || 1200
-    const height = containerRef.current?.clientHeight || 800
+    const cWidth = containerRef.current?.clientWidth || 1200
+    const cHeight = containerRef.current?.clientHeight || 800
+    // Use a larger virtual canvas so nodes have room to spread
+    const layoutW = Math.max(cWidth, 1600)
+    const layoutH = Math.max(cHeight, 1200)
 
     const simNodes = nodes.map((n) => ({ ...n }))
     const links = connections.map((c) => ({
@@ -39,16 +43,16 @@ export default function MindPalace() {
       .forceSimulation(simNodes)
       .force(
         'link',
-        d3.forceLink(links).id((d) => d.id).distance(280).strength(0.3)
+        d3.forceLink(links).id((d) => d.id).distance(250).strength(0.12)
       )
-      .force('charge', d3.forceManyBody().strength(-1200))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius(110))
-      .force('x', d3.forceX(width / 2).strength(0.03))
-      .force('y', d3.forceY(height / 2).strength(0.03))
+      .force('charge', d3.forceManyBody().strength(-800))
+      .force('collision', d3.forceCollide().radius(100))
+      // DIKW column positioning: D→I→K→W left to right
+      .force('x', d3.forceX((d) => layoutW * (DIKW_COLUMN[d.type] || 0.5)).strength(0.7))
+      // Spread vertically within each column
+      .force('y', d3.forceY(layoutH / 2).strength(0.03))
       .stop()
 
-    // Run to completion synchronously
     for (let i = 0; i < 300; i++) simulation.tick()
 
     const pos = {}
@@ -56,7 +60,28 @@ export default function MindPalace() {
       pos[n.id] = { x: n.x, y: n.y }
     })
     setPositions(pos)
+
+    // Auto-fit: compute bounding box and zoom/pan to fit all nodes
+    const xs = simNodes.map((n) => n.x)
+    const ys = simNodes.map((n) => n.y)
+    const minX = Math.min(...xs) - 40
+    const maxX = Math.max(...xs) + NODE_WIDTH + 40
+    const minY = Math.min(...ys) - 40
+    const maxY = Math.max(...ys) + NODE_HEIGHT_EST + 40
+    const bboxW = maxX - minX
+    const bboxH = maxY - minY
+    const scaleX = cWidth / bboxW
+    const scaleY = cHeight / bboxH
+    const k = Math.min(scaleX, scaleY, 1) * 0.92 // 92% to leave padding
+    const fitX = (cWidth - bboxW * k) / 2 - minX * k
+    const fitY = (cHeight - bboxH * k) / 2 - minY * k
+    setTransform({ x: fitX, y: fitY, k })
   }, [nodes, connections])
+
+  // Initial layout
+  useEffect(() => {
+    computeLayout()
+  }, [computeLayout])
 
   // Wheel zoom (needs non-passive listener for preventDefault)
   useEffect(() => {
@@ -264,6 +289,9 @@ export default function MindPalace() {
 
       {/* Zoom controls */}
       <div className="zoom-controls">
+        <button className="zoom-btn auto-layout-btn" onClick={computeLayout}>
+          ⚡ Auto Layout
+        </button>
         <button
           className="zoom-btn"
           onClick={() =>

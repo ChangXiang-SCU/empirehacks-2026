@@ -3,288 +3,256 @@ import { v4 as uuidv4 } from 'uuid'
 export function seedData() {
   const now = new Date()
   const projects = [
-    { id: 'proj_cs2110', name: 'CS 2110 Debug', color: '#3949ab' },
-    { id: 'proj_govt', name: 'GOVT Essay', color: '#f57c00' },
-    { id: 'proj_hack', name: 'Hackathon Project', color: '#e53935' }
+    { id: 'proj_ta', name: 'CS 4780 TA Grading', color: '#3949ab' },
+    { id: 'proj_job', name: '春招求职', color: '#f57c00' },
+    { id: 'proj_research', name: 'Driver-Ped Interaction Study', color: '#00897b' },
+    { id: 'proj_dp1', name: 'Design Project 1', color: '#e53935' },
+    { id: 'proj_hack', name: 'EmpireHacks 2026', color: '#667eea' },
+    { id: 'proj_adapt', name: 'ADAPT Network Challenge', color: '#ab47bc' }
   ]
 
   const mcpSources = [
-    { id: 'mcp_github', name: 'GitHub API', status: 'connected', icon: '🔗', dataCount: 5 },
-    { id: 'mcp_scholar', name: 'Google Scholar', status: 'idle', icon: '📚', dataCount: 3 },
-    { id: 'mcp_slack', name: 'Slack', status: 'connected', icon: '💬', dataCount: 7 }
+    { id: 'mcp_chrome', name: 'Chrome Browser', status: 'connected', icon: '🌐', dataCount: 14 },
+    { id: 'mcp_gworkspace', name: 'Google Workspace', status: 'connected', icon: '📧', dataCount: 9 },
+    { id: 'mcp_github', name: 'GitHub', status: 'connected', icon: '🐙', dataCount: 6 },
+    { id: 'mcp_desktop', name: 'Desktop Commander', status: 'connected', icon: '💻', dataCount: 8 }
   ]
 
   const nodes = [
-    // CS 2110 - Data nodes
-    {
-      id: 'node_d1',
-      type: 'D',
-      projectId: 'proj_cs2110',
-      sourcePlatform: 'claude-code',
-      content: 'fibonacci.java: Recursive implementation, exponential time complexity O(2^n)',
-      tags: ['algorithm', 'performance', 'file:fibonacci.java'],
-      dtype: 'code-analysis',
-      mcpSource: 'github',
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 7).toISOString()
-    },
-    {
-      id: 'node_d2',
-      type: 'D',
-      projectId: 'proj_cs2110',
-      sourcePlatform: 'claude-code',
-      content: 'Session log: debugged recursive calls, identified cache misses with 15M+ recomputations',
-      tags: ['debugging', 'session-log', 'performance-analysis'],
-      dtype: 'session-note',
-      mcpSource: null,
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 6).toISOString()
-    },
-    {
-      id: 'node_d3',
-      type: 'D',
-      projectId: 'proj_cs2110',
-      sourcePlatform: 'claude-code',
-      content: 'GitHub MCP: Fetched commit history showing 3 optimization attempts over 2 weeks',
-      tags: ['git-history', 'mcp-source:github', 'timeline'],
-      dtype: 'mcp-data',
-      mcpSource: 'github',
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 5).toISOString()
-    },
+    // ===== CS 4780 TA Grading — Data =====
+    { id: 'ta_d1', type: 'D', projectId: 'proj_ta', sourcePlatform: 'claude-cowork',
+      content: 'Gradescope PDF submissions from 82 students for CS 4780 ML homework — GMM, K-sweep, NLL analysis problems',
+      tags: ['gradescope', 'pdf-submissions', 'machine-learning'],
+      dtype: 'file', mcpSource: 'chrome', sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 3).toISOString() },
+    { id: 'ta_d2', type: 'D', projectId: 'proj_ta', sourcePlatform: 'claude-cowork',
+      content: 'Session log: 50+ Chrome automation actions — search student, click submission, navigate pages, verify rubric, modify scores on Gradescope',
+      tags: ['session-log', 'chrome-automation', 'gradescope'],
+      dtype: 'session-note', mcpSource: 'chrome', sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 3).toISOString() },
+    { id: 'ta_d3', type: 'D', projectId: 'proj_ta', sourcePlatform: 'claude-cowork',
+      content: 'K-Sweep NLL reference values: K=1 NLL=-391.8, K=4 NLL=-532.8, K=16 NLL=-547.0, K=32 NLL=-548.5, K=64 NLL=-549.7, K=128 NLL=-548.8',
+      tags: ['reference-data', 'nll-values', 'k-sweep'],
+      dtype: 'data-extract', mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 3).toISOString() },
+    // ===== CS 4780 TA Grading — Information =====
+    { id: 'ta_i1', type: 'I', projectId: 'proj_ta', sourcePlatform: 'claude-cowork',
+      content: 'Pattern detected: 5 students lost points on Q7.1/7.2/8.1 for "not assigning pages" when their NLL values and plots were actually correct — false negative grading error',
+      tags: ['grading-pattern', 'false-negative', 'rubric-error'],
+      dtype: null, mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 2).toISOString() },
+    { id: 'ta_i2', type: 'I', projectId: 'proj_ta', sourcePlatform: 'claude-cowork',
+      content: 'Progress tracking: 5 students × 5 questions each need rubric corrections. Yutong Wang and Chien-Wei Wang fully corrected; Kendall Miller, Hsin-Yu Tsai, Ammar Syed partially done',
+      tags: ['progress-tracking', 'rubric-correction', 'status-report'],
+      dtype: null, mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 2).toISOString() },
+    // ===== CS 4780 TA Grading — Knowledge =====
+    { id: 'ta_k1', type: 'K', projectId: 'proj_ta', sourcePlatform: 'claude-cowork',
+      content: 'Skill: verify-before-penalize — When grading at scale, always verify actual content exists before applying structural penalties. PDF page assignment ≠ content absence',
+      tags: ['skill', 'grading-methodology', 'cross-domain'],
+      dtype: null, mcpSource: null, sharedProjects: ['proj_research'],
+      createdAt: new Date(now - 86400000 * 1).toISOString() },
+    { id: 'ta_k2', type: 'K', projectId: 'proj_ta', sourcePlatform: 'claude-cowork',
+      content: 'Skill: browser-automation-for-repetitive-tasks — Chrome MCP can automate Gradescope grading: search→click→scroll→verify→modify rubric. Saves ~2min per student per question',
+      tags: ['skill', 'automation', 'chrome-mcp'],
+      dtype: null, mcpSource: 'chrome', sharedProjects: ['proj_job'],
+      createdAt: new Date(now - 86400000 * 1).toISOString() },
+    // ===== 春招求职 — Data =====
+    { id: 'job_d1', type: 'D', projectId: 'proj_job', sourcePlatform: 'claude-cowork',
+      content: '748 raw job listings scraped from Geely (吉利) campus recruitment — 29 pages of positions across all departments',
+      tags: ['web-scraping', 'geely', 'campus-recruitment'],
+      dtype: 'scraped-data', mcpSource: 'chrome', sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 5).toISOString() },
+    { id: 'job_d2', type: 'D', projectId: 'proj_job', sourcePlatform: 'claude-cowork',
+      content: 'Google Sheets created via Workspace MCP: formatted spreadsheets with hyperlinks, job descriptions, department info, and location data',
+      tags: ['google-sheets', 'mcp-source:workspace', 'structured-data'],
+      dtype: 'mcp-data', mcpSource: 'gworkspace', sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 5).toISOString() },
+    { id: 'job_d3', type: 'D', projectId: 'proj_job', sourcePlatform: 'claude-cowork',
+      content: 'User resume profile: Cornell Tech MS (Connective Media, 4.0 GPA), CHI/AutomotiveUI publications, Stanford/Tsinghua research, HCI + AI focus',
+      tags: ['resume', 'profile', 'matching-input'],
+      dtype: 'user-profile', mcpSource: null, sharedProjects: ['proj_hack'],
+      createdAt: new Date(now - 86400000 * 6).toISOString() },
+    // ===== 春招求职 — Information =====
+    { id: 'job_i1', type: 'I', projectId: 'proj_job', sourcePlatform: 'claude-cowork',
+      content: 'After dedup and sales-filter: 748→700 unique→678 valid positions. 28 recommended (16 ⭐⭐⭐ high match + 12 ⭐⭐ medium match). Best matches: UX, user research, HMI, VR design roles',
+      tags: ['analysis-result', 'recommendation', 'filtering'],
+      dtype: null, mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 4).toISOString() },
+    { id: 'job_i2', type: 'I', projectId: 'proj_job', sourcePlatform: 'claude-cowork',
+      content: 'Pattern: HCI-adjacent roles in automotive (Geely) are abundant — 整车用户体验、用户调研、人机交互、VR设计、HMI项目管理 all highly relevant to user background',
+      tags: ['industry-insight', 'hci-automotive', 'career-pattern'],
+      dtype: null, mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 4).toISOString() },
+    // ===== 春招求职 — Knowledge =====
+    { id: 'job_k1', type: 'K', projectId: 'proj_job', sourcePlatform: 'claude-cowork',
+      content: 'Skill: job-scraping-pipeline — Scrape career pages → deduplicate → filter irrelevant (sales) → match against resume → rank by fit → output to Google Sheets with hyperlinks',
+      tags: ['skill', 'workflow', 'automation'],
+      dtype: null, mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 3).toISOString() },
 
-    // CS 2110 - Information nodes
-    {
-      id: 'node_i1',
-      type: 'I',
-      projectId: 'proj_cs2110',
-      sourcePlatform: 'claude-code',
-      content: 'Fibonacci recursion causes exponential recomputation of subproblems. Memoization needed for n > 20.',
-      tags: ['dynamic-programming', 'optimization-hint'],
-      dtype: null,
-      mcpSource: null,
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 4).toISOString()
-    },
-    {
-      id: 'node_i2',
-      type: 'I',
-      projectId: 'proj_cs2110',
-      sourcePlatform: 'claude-code',
-      content: 'Pattern: Student iterates multiple times before optimizing. Shows learning curve in structural thinking.',
-      tags: ['learning-pattern', 'pedagogy'],
-      dtype: null,
-      mcpSource: null,
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 3).toISOString()
-    },
+    // ===== Driver-Ped Research — Data =====
+    { id: 'res_d1', type: 'D', projectId: 'proj_research', sourcePlatform: 'claude-cowork',
+      content: '31 participants, 12,558 raw records from lab NAS — driver-pedestrian interaction study with Likert scales + categorical variables from questionnaires',
+      tags: ['experiment-data', 'nas-storage', 'raw-data'],
+      dtype: 'research-data', mcpSource: 'desktop', sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 4).toISOString() },
+    { id: 'res_d2', type: 'D', projectId: 'proj_research', sourcePlatform: 'claude-cowork',
+      content: 'Python analysis pipeline: pandas + scipy + statsmodels LMM. Processed inclusion criteria (both parties noticed each other), excluded 19 trials, retained 289 valid trials',
+      tags: ['python-analysis', 'data-processing', 'statistical-methods'],
+      dtype: 'code-analysis', mcpSource: 'desktop', sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 4).toISOString() },
+    // ===== Driver-Ped Research — Information =====
+    { id: 'res_i1', type: 'I', projectId: 'proj_research', sourcePlatform: 'claude-cowork',
+      content: 'Key finding: Right of Way agreement only 19.4% (χ²=52.86, p<0.001). "Who Entered First" agreement only 11.5% (χ²=196.33, p<0.001). Drivers and pedestrians fundamentally disagree on interaction dynamics',
+      tags: ['statistical-finding', 'chi-squared', 'perception-gap'],
+      dtype: null, mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 3).toISOString() },
+    { id: 'res_i2', type: 'I', projectId: 'proj_research', sourcePlatform: 'claude-cowork',
+      content: 'Drivers significantly more stressed than pedestrians (M=3.59 vs 4.08, p<0.001, d=-0.41). Shared space scenarios create highest cognitive load and lowest relaxation for both parties',
+      tags: ['likert-analysis', 'lmm-result', 'stress-finding'],
+      dtype: null, mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 3).toISOString() },
+    { id: 'res_i3', type: 'I', projectId: 'proj_research', sourcePlatform: 'claude-cowork',
+      content: 'Data quality issue: Likert text labels did not match preset mapping. Fix: used AnswerId (1-5) directly as numeric values instead of text parsing. Speed perception scales differ between roles — cannot compare directly',
+      tags: ['data-quality', 'methodology-fix', 'lessons-learned'],
+      dtype: null, mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 3).toISOString() },
+    // ===== Driver-Ped Research — Knowledge =====
+    { id: 'res_k1', type: 'K', projectId: 'proj_research', sourcePlatform: 'claude-cowork',
+      content: 'Skill: always-check-raw-labels — When analyzing Likert data, always inspect actual response text before mapping. Preset mappings often mismatch survey implementations. Use numeric IDs when available',
+      tags: ['skill', 'data-analysis', 'methodology'],
+      dtype: null, mcpSource: null, sharedProjects: ['proj_ta'],
+      createdAt: new Date(now - 86400000 * 2).toISOString() },
+    { id: 'res_k2', type: 'K', projectId: 'proj_research', sourcePlatform: 'claude-cowork',
+      content: 'Skill: structured-analysis-report — Present statistical results with effect sizes (Cohen d), confidence intervals, and scenario breakdowns. Always pair p-values with practical significance',
+      tags: ['skill', 'academic-writing', 'statistics'],
+      dtype: null, mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 2).toISOString() },
 
-    // CS 2110 - Knowledge nodes
-    {
-      id: 'node_k1',
-      type: 'K',
-      projectId: 'proj_cs2110',
-      sourcePlatform: 'claude-code',
-      content: 'Skill: Use structure-first approach. For algorithm problems: clarify data structure → identify patterns → then optimize. Avoids premature optimization.',
-      tags: ['skill', 'methodology', 'algorithm-design'],
-      dtype: null,
-      mcpSource: null,
-      sharedProjects: ['proj_hack'],
-      createdAt: new Date(now - 86400000 * 2).toISOString()
-    },
+    // ===== Design Project 1 — Data =====
+    { id: 'dp1_d1', type: 'D', projectId: 'proj_dp1', sourcePlatform: 'claude-cowork',
+      content: 'Google Doc design report with images: sketch_clean.png, Fusion 360 screenshots, Bambu Studio prints, failed red print photos. Doc ID: 1a7UGPbLUi6DvKbuIu_aeGbrBc-G2Y757j3rebxoq22g',
+      tags: ['google-doc', 'design-report', 'images'],
+      dtype: 'file', mcpSource: 'gworkspace', sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 6).toISOString() },
+    { id: 'dp1_d2', type: 'D', projectId: 'proj_dp1', sourcePlatform: 'claude-cowork',
+      content: 'Session log: fixed missing first paragraph, inserted sketch image, added Figure captions (Fig 1, 3, 4). Multiple Google Workspace MCP calls for doc inspection and modification',
+      tags: ['session-log', 'doc-editing', 'mcp-source:workspace'],
+      dtype: 'session-note', mcpSource: 'gworkspace', sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 6).toISOString() },
+    // ===== Design Project 1 — Information =====
+    { id: 'dp1_i1', type: 'I', projectId: 'proj_dp1', sourcePlatform: 'claude-cowork',
+      content: 'Design insight: 608 bearing enables extremely smooth low-friction rotation → YoYo concept. Design started from physical constraint, not aesthetic goal. Iterative 3D printing with failures informed final form',
+      tags: ['design-insight', 'mechanical-design', 'iteration'],
+      dtype: null, mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 5).toISOString() },
+    // ===== Design Project 1 — Knowledge =====
+    { id: 'dp1_k1', type: 'K', projectId: 'proj_dp1', sourcePlatform: 'claude-cowork',
+      content: 'Skill: doc-image-management — When editing Google Docs with images, always verify images are present after edits (not just captions). Workspace MCP insert_doc_image + inspect_doc_structure is the reliable workflow',
+      tags: ['skill', 'google-docs', 'image-handling'],
+      dtype: null, mcpSource: 'gworkspace', sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 5).toISOString() },
 
-    // CS 2110 - Wisdom nodes
-    {
-      id: 'node_w1',
-      type: 'W',
-      projectId: 'proj_cs2110',
-      sourcePlatform: 'claude-code',
-      content: 'Wisdom: Structure-first approach works only for problems where fundamental algorithmic improvement is possible. For I/O-bound problems, structure matters less than caching strategy.',
-      tags: ['meta-judgment', 'constraint-aware', 'trade-off'],
-      dtype: null,
-      mcpSource: null,
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 1).toISOString()
-    },
-
-    // GOVT Essay - Data nodes
-    {
-      id: 'node_d4',
-      type: 'D',
-      projectId: 'proj_govt',
-      sourcePlatform: 'claude-web',
-      content: 'carbon_tax_draft.docx: Initial thesis arguing for progressive taxation model',
-      tags: ['essay', 'file:carbon_tax_draft.docx', 'policy'],
-      dtype: 'document',
-      mcpSource: null,
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 7).toISOString()
-    },
-    {
-      id: 'node_d5',
-      type: 'D',
-      projectId: 'proj_govt',
-      sourcePlatform: 'claude-web',
-      content: 'Session: Revised intro 5 times, analyzed counterarguments, added 8 academic citations',
-      tags: ['writing-process', 'session-log'],
-      dtype: 'session-note',
-      mcpSource: null,
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 5).toISOString()
-    },
-    {
-      id: 'node_d6',
-      type: 'D',
-      projectId: 'proj_govt',
-      sourcePlatform: 'claude-web',
-      content: 'Google Scholar MCP: Found 12 papers on carbon tax efficacy, 3 critiques of progressive models',
-      tags: ['research', 'mcp-source:scholar', 'citations'],
-      dtype: 'mcp-data',
-      mcpSource: 'scholar',
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 4).toISOString()
-    },
-
-    // GOVT Essay - Information nodes
-    {
-      id: 'node_i3',
-      type: 'I',
-      projectId: 'proj_govt',
-      sourcePlatform: 'claude-web',
-      content: 'Writer revises intro repeatedly to clarify policy position. Each revision strengthens counterargument resistance.',
-      tags: ['writing-strategy', 'argumentation'],
-      dtype: null,
-      mcpSource: null,
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 3).toISOString()
-    },
-
-    // GOVT Essay - Knowledge nodes
-    {
-      id: 'node_k2',
-      type: 'K',
-      projectId: 'proj_govt',
-      sourcePlatform: 'claude-web',
-      content: 'Skill: Incremental-over-rewrite approach for policy essays. Revise opening multiple times to build argument strength. Works better than structural rewrites for policy papers.',
-      tags: ['skill', 'writing', 'policy-writing'],
-      dtype: null,
-      mcpSource: null,
-      sharedProjects: ['proj_hack'],
-      createdAt: new Date(now - 86400000 * 2).toISOString()
-    },
-
-    // GOVT Essay - Wisdom nodes
-    {
-      id: 'node_w2',
-      type: 'W',
-      projectId: 'proj_govt',
-      sourcePlatform: 'claude-web',
-      content: 'Wisdom: Incremental approach effective only when audience is receptive to policy nuance. For advocacy essays, rewrite structure instead. Progressive taxation essays work incrementally because complexity demands repeated exposure.',
-      tags: ['meta-judgment', 'context-dependent', 'audience-analysis'],
-      dtype: null,
-      mcpSource: null,
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 1).toISOString()
-    },
-
-    // Hackathon - Data nodes
-    {
-      id: 'node_d7',
-      type: 'D',
-      projectId: 'proj_hack',
-      sourcePlatform: 'claude-code',
-      content: 'hackathon-brief.md: 48-hour constraint, 3-person team, MVP required by hour 36',
-      tags: ['project-brief', 'constraints', 'timeline'],
-      dtype: 'specification',
-      mcpSource: null,
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 3).toISOString()
-    },
-    {
-      id: 'node_d8',
-      type: 'D',
-      projectId: 'proj_hack',
-      sourcePlatform: 'claude-code',
-      content: 'Slack MCP: Team decided: API-first architecture, skip frontend polish, focus on demo quality',
-      tags: ['team-decision', 'mcp-source:slack', 'architecture'],
-      dtype: 'mcp-data',
-      mcpSource: 'slack',
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 2).toISOString()
-    },
-
-    // Hackathon - Information nodes
-    {
-      id: 'node_i4',
-      type: 'I',
-      projectId: 'proj_hack',
-      sourcePlatform: 'claude-code',
-      content: 'Time pressure forced architectural decisions: API design took priority over implementation polish. Team sacrificed UX completeness for backend robustness.',
-      tags: ['decision-analysis', 'time-constraint'],
-      dtype: null,
-      mcpSource: null,
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 1).toISOString()
-    },
-
-    // Hackathon - Knowledge nodes
-    {
-      id: 'node_k3',
-      type: 'K',
-      projectId: 'proj_hack',
-      sourcePlatform: 'claude-code',
-      content: 'Skill: Hackathon-scoping. Identify critical demo elements (48h). Use API-first design. Polish late, validate core functionality early.',
+    // ===== EmpireHacks 2026 — Data =====
+    { id: 'hack_d1', type: 'D', projectId: 'proj_hack', sourcePlatform: 'claude-cowork',
+      content: 'EmpireHacks 2026 application form: Track 3 — agentic AI solutions for real-world workflows. 48-hour hackathon, demo video required, judging rubric from Slack',
+      tags: ['hackathon', 'application', 'track-3'],
+      dtype: 'file', mcpSource: 'chrome', sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 8).toISOString() },
+    { id: 'hack_d2', type: 'D', projectId: 'proj_hack', sourcePlatform: 'claude-cowork',
+      content: 'User profile scraped from changxiang-scu.github.io: CHI + AutomotiveUI publications, Stanford/Tsinghua research, Cornell Tech MS 4.0 GPA, LLM-powered LaTeX IDE, multi-agent robotics (AAAI under review)',
+      tags: ['profile', 'github-pages', 'academic-background'],
+      dtype: 'scraped-data', mcpSource: 'chrome', sharedProjects: ['proj_job'],
+      createdAt: new Date(now - 86400000 * 8).toISOString() },
+    // ===== EmpireHacks 2026 — Information =====
+    { id: 'hack_i1', type: 'I', projectId: 'proj_hack', sourcePlatform: 'claude-cowork',
+      content: 'Application strategy: highlight intersection of HCI research depth (CHI/AutomotiveUI) + AI building ability (LLM tools, multi-agent) + unique human-in-the-loop perspective. Emphasize agentic systems that are genuinely usable',
+      tags: ['strategy', 'application-writing', 'positioning'],
+      dtype: null, mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 7).toISOString() },
+    // ===== EmpireHacks 2026 — Knowledge =====
+    { id: 'hack_k1', type: 'K', projectId: 'proj_hack', sourcePlatform: 'claude-cowork',
+      content: 'Skill: hackathon-scoping — Under 48hr constraint: identify ONE killer demo flow → polish it → skip everything else. For Mnemosyne: focus on mind-palace graph UI as the hero feature',
       tags: ['skill', 'project-management', 'hackathon'],
-      dtype: null,
-      mcpSource: null,
-      sharedProjects: [],
-      createdAt: new Date(now - 86400000 * 1).toISOString()
-    },
+      dtype: null, mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 7).toISOString() },
 
-    // Hackathon - Wisdom nodes
-    {
-      id: 'node_w3',
-      type: 'W',
-      projectId: 'proj_hack',
-      sourcePlatform: 'claude-code',
-      content: 'Wisdom: Time constraint is most limiting factor in hackathons. Prioritize: demo-readiness > feature-completeness > code-quality. Trade-off only works when judges value innovation over polish.',
-      tags: ['meta-judgment', 'constraint-aware', 'judging-criteria'],
-      dtype: null,
-      mcpSource: null,
-      sharedProjects: [],
-      createdAt: new Date(now).toISOString()
-    }
+    // ===== ADAPT Network Challenge — Data =====
+    { id: 'adapt_d1', type: 'D', projectId: 'proj_adapt', sourcePlatform: 'claude-cowork',
+      content: 'ADAPT Network challenge brief: design for actors with disabilities, especially Cerebral Palsy. Form fields: stakeholders, key question, need statement',
+      tags: ['design-challenge', 'accessibility', 'form-data'],
+      dtype: 'file', mcpSource: 'chrome', sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 2).toISOString() },
+    // ===== ADAPT Network Challenge — Information =====
+    { id: 'adapt_i1', type: 'I', projectId: 'proj_adapt', sourcePlatform: 'claude-cowork',
+      content: 'Three key stakeholders identified: (1) Actors with disabilities, especially CP, (2) ADAPT staff and caregivers, (3) Director and creative team. Core need: device-free script navigation to reduce physical fatigue',
+      tags: ['stakeholder-analysis', 'need-finding', 'accessibility'],
+      dtype: null, mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 1).toISOString() },
+    { id: 'adapt_i2', type: 'I', projectId: 'proj_adapt', sourcePlatform: 'claude-cowork',
+      content: 'Need statement: Actors with CP need a way to navigate scripts and operate devices without relying on repetitive hand movements so they can rehearse independently and focus on performance',
+      tags: ['need-statement', 'design-brief', 'human-centered'],
+      dtype: null, mcpSource: null, sharedProjects: [],
+      createdAt: new Date(now - 86400000 * 1).toISOString() },
+    // ===== Cross-project Wisdom =====
+    { id: 'w1', type: 'W', projectId: 'proj_research', sourcePlatform: 'claude-cowork',
+      content: 'CLAUDE.md: In human interaction studies, communication inconsistency is the norm — unlike controlled AV studies. Always design for ambiguity, not consensus. This applies to UX research, TA feedback, and team collaboration',
+      tags: ['meta-rule', 'research-wisdom', 'design-principle'],
+      dtype: null, mcpSource: null, sharedProjects: ['proj_ta', 'proj_adapt'],
+      createdAt: new Date(now - 86400000 * 1).toISOString() },
+    { id: 'w2', type: 'W', projectId: 'proj_hack', sourcePlatform: 'claude-cowork',
+      content: 'CLAUDE.md: MCP tools are force multipliers — Chrome for web automation, Workspace for doc management, Desktop Commander for local processing. Chain them for complex workflows. But always verify outputs at each step',
+      tags: ['meta-rule', 'tool-philosophy', 'mcp-wisdom'],
+      dtype: null, mcpSource: null, sharedProjects: ['proj_ta', 'proj_job', 'proj_research'],
+      createdAt: new Date(now - 86400000 * 1).toISOString() },
+    { id: 'w3', type: 'W', projectId: 'proj_job', sourcePlatform: 'claude-cowork',
+      content: 'CLAUDE.md: User works inside-out — tackles core substance first, then framing. For code: fix logic before style. For essays: evidence before intro. For job search: match skills before polishing resume. Adapt assistance order accordingly',
+      tags: ['meta-rule', 'user-preference', 'work-style'],
+      dtype: null, mcpSource: null, sharedProjects: ['proj_dp1', 'proj_adapt'],
+      createdAt: new Date(now - 86400000 * 1).toISOString() },
   ]
 
   const connections = [
-    // CS 2110 flow
-    { id: 'conn_1', fromNodeId: 'node_d1', toNodeId: 'node_d2', label: 'informs' },
-    { id: 'conn_2', fromNodeId: 'node_d2', toNodeId: 'node_d3', label: 'documented-in' },
-    { id: 'conn_3', fromNodeId: 'node_d1', toNodeId: 'node_i1', label: 'reveals' },
-    { id: 'conn_4', fromNodeId: 'node_d2', toNodeId: 'node_i2', label: 'demonstrates' },
-    { id: 'conn_5', fromNodeId: 'node_i1', toNodeId: 'node_k1', label: 'becomes' },
-    { id: 'conn_6', fromNodeId: 'node_i2', toNodeId: 'node_k1', label: 'generalizes' },
-    { id: 'conn_7', fromNodeId: 'node_k1', toNodeId: 'node_w1', label: 'contextualized-by' },
-
-    // GOVT flow
-    { id: 'conn_8', fromNodeId: 'node_d4', toNodeId: 'node_d5', label: 'evolved-through' },
-    { id: 'conn_9', fromNodeId: 'node_d5', toNodeId: 'node_d6', label: 'supported-by' },
-    { id: 'conn_10', fromNodeId: 'node_d4', toNodeId: 'node_i3', label: 'demonstrates' },
-    { id: 'conn_11', fromNodeId: 'node_d5', toNodeId: 'node_i3', label: 'shows' },
-    { id: 'conn_12', fromNodeId: 'node_i3', toNodeId: 'node_k2', label: 'becomes' },
-    { id: 'conn_13', fromNodeId: 'node_k2', toNodeId: 'node_w2', label: 'contextualized-by' },
-
-    // Hackathon flow
-    { id: 'conn_14', fromNodeId: 'node_d7', toNodeId: 'node_d8', label: 'constrains' },
-    { id: 'conn_15', fromNodeId: 'node_d7', toNodeId: 'node_i4', label: 'reveals' },
-    { id: 'conn_16', fromNodeId: 'node_d8', toNodeId: 'node_i4', label: 'shows' },
-    { id: 'conn_17', fromNodeId: 'node_i4', toNodeId: 'node_k3', label: 'becomes' },
-    { id: 'conn_18', fromNodeId: 'node_k3', toNodeId: 'node_w3', label: 'contextualized-by' },
-
-    // Cross-project connections
-    { id: 'conn_19', fromNodeId: 'node_k1', toNodeId: 'node_k2', label: 'related-to' },
-    { id: 'conn_20', fromNodeId: 'node_k2', toNodeId: 'node_k3', label: 'complements' }
+    // TA Grading: D→I→K
+    { id: 'c1', fromNodeId: 'ta_d1', toNodeId: 'ta_i1', label: 'revealed pattern' },
+    { id: 'c2', fromNodeId: 'ta_d2', toNodeId: 'ta_i2', label: 'logged progress' },
+    { id: 'c3', fromNodeId: 'ta_d3', toNodeId: 'ta_i1', label: 'validated against' },
+    { id: 'c4', fromNodeId: 'ta_i1', toNodeId: 'ta_k1', label: 'generalizes to' },
+    { id: 'c5', fromNodeId: 'ta_i2', toNodeId: 'ta_k2', label: 'generalizes to' },
+    // Job Search: D→I→K
+    { id: 'c6', fromNodeId: 'job_d1', toNodeId: 'job_i1', label: 'filtered into' },
+    { id: 'c7', fromNodeId: 'job_d2', toNodeId: 'job_i1', label: 'structured as' },
+    { id: 'c8', fromNodeId: 'job_d3', toNodeId: 'job_i2', label: 'matched against' },
+    { id: 'c9', fromNodeId: 'job_i1', toNodeId: 'job_k1', label: 'generalizes to' },
+    { id: 'c10', fromNodeId: 'job_i2', toNodeId: 'job_k1', label: 'reinforces' },
+    // Research: D→I→K
+    { id: 'c11', fromNodeId: 'res_d1', toNodeId: 'res_i1', label: 'analyzed into' },
+    { id: 'c12', fromNodeId: 'res_d2', toNodeId: 'res_i2', label: 'produced' },
+    { id: 'c13', fromNodeId: 'res_d2', toNodeId: 'res_i3', label: 'uncovered issue' },
+    { id: 'c14', fromNodeId: 'res_i1', toNodeId: 'res_k2', label: 'generalizes to' },
+    { id: 'c15', fromNodeId: 'res_i3', toNodeId: 'res_k1', label: 'generalizes to' },
+    // DP1: D→I→K
+    { id: 'c16', fromNodeId: 'dp1_d1', toNodeId: 'dp1_i1', label: 'documented in' },
+    { id: 'c17', fromNodeId: 'dp1_d2', toNodeId: 'dp1_k1', label: 'generalizes to' },
+    // Hackathon: D→I→K
+    { id: 'c18', fromNodeId: 'hack_d1', toNodeId: 'hack_i1', label: 'informed' },
+    { id: 'c19', fromNodeId: 'hack_d2', toNodeId: 'hack_i1', label: 'sourced from' },
+    { id: 'c20', fromNodeId: 'hack_i1', toNodeId: 'hack_k1', label: 'generalizes to' },
+    // ADAPT: D→I
+    { id: 'c21', fromNodeId: 'adapt_d1', toNodeId: 'adapt_i1', label: 'analyzed into' },
+    { id: 'c22', fromNodeId: 'adapt_i1', toNodeId: 'adapt_i2', label: 'synthesized into' },
+    // Cross-project → Wisdom
+    { id: 'c23', fromNodeId: 'res_k1', toNodeId: 'w1', label: 'evolves into' },
+    { id: 'c24', fromNodeId: 'res_k2', toNodeId: 'w1', label: 'evolves into' },
+    { id: 'c25', fromNodeId: 'ta_k2', toNodeId: 'w2', label: 'evolves into' },
+    { id: 'c26', fromNodeId: 'job_k1', toNodeId: 'w2', label: 'evolves into' },
+    { id: 'c27', fromNodeId: 'hack_k1', toNodeId: 'w3', label: 'evolves into' },
+    // Cross-project reinforcements
+    { id: 'c28', fromNodeId: 'ta_k1', toNodeId: 'res_k1', label: 'reinforces' },
+    { id: 'c29', fromNodeId: 'job_d3', toNodeId: 'hack_d2', label: 'same source' },
+    { id: 'c30', fromNodeId: 'adapt_i2', toNodeId: 'w1', label: 'reinforces' },
   ]
 
-  return { projects, nodes, connections, mcpSources }
+  return { projects, mcpSources, nodes, connections }
 }

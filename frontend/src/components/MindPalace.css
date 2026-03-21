@@ -236,3 +236,18 @@
   width: auto;
   padding: 0 8px;
 }
+
+.auto-layout-btn {
+  width: auto;
+  padding: 0 12px;
+  font-size: 12px;
+  margin-right: 8px;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  border-color: transparent;
+}
+
+.auto-layout-btn:hover {
+  background: linear-gradient(135deg, #5a6fd6, #6a4198);
+  color: white;
+}
