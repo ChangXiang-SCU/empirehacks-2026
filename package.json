@@ -1,0 +1,25 @@
+{
+  "name": "empirehacks-2026",
+  "version": "0.1.0",
+  "description": "Mnemosyne: Agent-agnostic knowledge management layer",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces",
+    "build": "npm run build --workspaces",
+    "start": "npm run start --workspaces",
+    "frontend": "npm run dev -w frontend",
+    "backend": "npm run dev -w backend"
+  },
+  "keywords": [
+    "knowledge-management",
+    "DIKW",
+    "agent",
+    "mcp"
+  ],
+  "author": "EmpireHacks 2026",
+  "license": "MIT"
+}
