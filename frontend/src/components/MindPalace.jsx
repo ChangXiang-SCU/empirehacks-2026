@@ -5,6 +5,8 @@ import { getColorByType, getLabelByType } from '../utils/dikwColors'
 import NodeCard from './NodeCard'
 import './MindPalace.css'
 
+const TYPE_RADIUS = { D: 20, I: 24, K: 28, W: 32 }
+
 export default function MindPalace() {
   const svgRef = useRef(null)
   const containerRef = useRef(null)
@@ -17,7 +19,6 @@ export default function MindPalace() {
   const panX = useGraphStore((state) => state.panX)
   const panY = useGraphStore((state) => state.panY)
   const selectedNodeId = useGraphStore((state) => state.selectedNodeId)
-  const currentTool = useGraphStore((state) => state.currentTool)
 
   const setPan = useGraphStore((state) => state.setPan)
   const setZoom = useGraphStore((state) => state.setZoom)
@@ -30,155 +31,156 @@ export default function MindPalace() {
     const width = containerRef.current?.clientWidth || 1200
     const height = containerRef.current?.clientHeight || 800
 
-    // Setup SVG
     const svg = d3.select(svgRef.current)
     svg.attr('width', width).attr('height', height)
 
-    // Create defs for arrowheads
+    // Defs: arrowhead + glow filter
     const defs = svg.append('defs')
     defs.append('marker')
       .attr('id', 'arrowhead')
-      .attr('markerWidth', 10)
-      .attr('markerHeight', 10)
-      .attr('refX', 24)
-      .attr('refY', 3)
-      .attr('orient', 'auto')
-      .append('polygon')
-      .attr('points', '0 0, 10 3, 0 6')
-      .attr('fill', '#666')
+      .attr('markerWidth', 10).attr('markerHeight', 10)
+      .attr('refX', 30).attr('refY', 3).attr('orient', 'auto')
+      .append('polygon').attr('points', '0 0, 10 3, 0 6').attr('fill', '#666')
 
-    // Setup zoom behavior
+    const filter = defs.append('filter').attr('id', 'glow')
+    filter.append('feGaussianBlur').attr('stdDeviation', '3.5').attr('result', 'coloredBlur')
+    const feMerge = filter.append('feMerge')
+    feMerge.append('feMergeNode').attr('in', 'coloredBlur')
+    feMerge.append('feMergeNode').attr('in', 'SourceGraphic')
+
+    // Zoom
+    const gGroup = svg.append('g')
     const zoomBehavior = d3.zoom()
+      .scaleExtent([0.2, 4])
       .on('zoom', (event) => {
-        const transform = event.transform
-        setPan(transform.x, transform.y)
-        setZoom(transform.k)
-        gGroup.attr('transform', transform)
+        gGroup.attr('transform', event.transform)
+        setPan(event.transform.x, event.transform.y)
+        setZoom(event.transform.k)
       })
-
     svg.call(zoomBehavior)
 
-    // Create group for panning
-    const gGroup = svg.append('g')
-      .attr('transform', `translate(${panX},${panY})scale(${zoom})`)
-
-    // Map connections to D3 format (source/target instead of fromNodeId/toNodeId)
+    // Map connections to D3 link format
     const links = connections.map(c => ({
       ...c,
       source: c.fromNodeId,
       target: c.toNodeId
     }))
 
-    // Create force simulation
+    // Force simulation
     const simulation = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(links)
-        .id(d => d.id)
-        .distance(100)
-        .strength(0.5)
-      )
-      .force('charge', d3.forceManyBody().strength(-300))
+      .force('link', d3.forceLink(links).id(d => d.id).distance(120).strength(0.4))
+      .force('charge', d3.forceManyBody().strength(-400))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius(40))
-
+      .force('collision', d3.forceCollide().radius(d => (TYPE_RADIUS[d.type] || 20) + 10))
+      .force('x', d3.forceX(width / 2).strength(0.05))
+      .force('y', d3.forceY(height / 2).strength(0.05))
     simulationRef.current = simulation
 
     // Draw links
     const linkSelection = gGroup.selectAll('.link')
-      .data(links, d => d.id)
-      .join('line')
+      .data(links, d => d.id).join('line')
       .attr('class', 'link')
-      .attr('stroke', '#555')
-      .attr('stroke-width', 2)
+      .attr('stroke', '#555').attr('stroke-width', 1.5)
       .attr('marker-end', 'url(#arrowhead)')
       .attr('stroke-dasharray', d => {
-        const fromNode = nodes.find(n => n.id === d.fromNodeId)
-        const toNode = nodes.find(n => n.id === d.toNodeId)
-        if (fromNode && toNode && fromNode.projectId !== toNode.projectId) {
-          return '5,5'
-        }
-        return '0'
+        const from = nodes.find(n => n.id === d.fromNodeId)
+        const to = nodes.find(n => n.id === d.toNodeId)
+        return from && to && from.projectId !== to.projectId ? '5,5' : '0'
       })
 
     // Draw link labels
     const labelSelection = gGroup.selectAll('.link-label')
-      .data(links, d => `label_${d.id}`)
-      .join('text')
+      .data(links, d => `label_${d.id}`).join('text')
       .attr('class', 'link-label')
       .text(d => d.label)
-      .attr('font-size', 12)
-      .attr('fill', '#999')
-      .attr('text-anchor', 'middle')
-      .attr('dy', -5)
+      .attr('font-size', 10).attr('fill', '#777')
+      .attr('text-anchor', 'middle').attr('dy', -6)
 
-    // Draw nodes
-    const nodeSelection = gGroup.selectAll('.node')
-      .data(nodes, d => d.id)
-      .join('circle')
-      .attr('class', 'node')
-      .attr('r', 24)
-      .attr('fill', d => getColorByType(d.type))
-      .attr('opacity', d => selectedNodeId === d.id ? 1 : 0.8)
-      .attr('stroke', d => selectedNodeId === d.id ? '#fff' : 'none')
-      .attr('stroke-width', d => selectedNodeId === d.id ? 2 : 0)
+    // Draw node groups (circle + type label + content preview)
+    const nodeGroup = gGroup.selectAll('.node-g')
+      .data(nodes, d => d.id).join('g')
+      .attr('class', 'node-g')
       .style('cursor', 'pointer')
+
+    // Circle
+    nodeGroup.append('circle')
+      .attr('class', 'node-circle')
+      .attr('r', d => TYPE_RADIUS[d.type] || 20)
+      .attr('fill', d => getColorByType(d.type))
+      .attr('opacity', 0.85)
+      .attr('stroke', d => selectedNodeId === d.id ? '#fff' : 'none')
+      .attr('stroke-width', 2)
+
+    // Type letter inside circle
+    nodeGroup.append('text')
+      .attr('class', 'node-type-label')
+      .text(d => d.type)
+      .attr('fill', 'white')
+      .attr('font-size', d => (TYPE_RADIUS[d.type] || 20) * 0.75)
+      .attr('font-weight', '700')
+      .attr('text-anchor', 'middle')
+      .attr('dominant-baseline', 'central')
+      .style('pointer-events', 'none')
+
+    // Content preview below circle
+    nodeGroup.append('text')
+      .attr('class', 'node-sub-label')
+      .attr('dy', d => (TYPE_RADIUS[d.type] || 20) + 14)
+      .attr('fill', '#aaa')
+      .attr('font-size', 10)
+      .attr('text-anchor', 'middle')
+      .style('pointer-events', 'none')
+      .text(d => {
+        const txt = d.content || ''
+        return txt.length > 22 ? txt.substring(0, 22) + '...' : txt
+      })
+
+    // Interactions
+    nodeGroup
       .on('click', (event, d) => {
         event.stopPropagation()
         selectNode(d.id)
+        nodeGroup.selectAll('.node-circle').attr('stroke', 'none')
+        d3.select(event.currentTarget).select('.node-circle').attr('stroke', '#fff')
       })
       .on('mouseover', (event, d) => {
+        d3.select(event.currentTarget).select('.node-circle')
+          .attr('filter', 'url(#glow)').attr('opacity', 1)
         setHoveredNode(d)
         hoverNode(d.id)
       })
-      .on('mouseout', () => {
+      .on('mouseout', (event) => {
+        d3.select(event.currentTarget).select('.node-circle')
+          .attr('filter', null).attr('opacity', 0.85)
         setHoveredNode(null)
         hoverNode(null)
       })
-      .call(d3.drag()
-        .on('start', dragStarted)
-        .on('drag', dragged)
-        .on('end', dragEnded)
-      )
 
-    // Update simulation on each tick
+    // Drag
+    nodeGroup.call(d3.drag()
+      .on('start', (event, d) => {
+        if (!event.active) simulation.alphaTarget(0.3).restart()
+        d.fx = d.x; d.fy = d.y
+      })
+      .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y })
+      .on('end', (event, d) => {
+        if (!event.active) simulation.alphaTarget(0)
+        d.fx = null; d.fy = null
+      })
+    )
+
+    // Tick
     simulation.on('tick', () => {
       linkSelection
-        .attr('x1', d => d.source.x)
-        .attr('y1', d => d.source.y)
-        .attr('x2', d => d.target.x)
-        .attr('y2', d => d.target.y)
-
+        .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y)
       labelSelection
         .attr('x', d => (d.source.x + d.target.x) / 2)
         .attr('y', d => (d.source.y + d.target.y) / 2)
-
-      nodeSelection
-        .attr('cx', d => d.x)
-        .attr('cy', d => d.y)
+      nodeGroup.attr('transform', d => `translate(${d.x},${d.y})`)
     })
 
-    // Drag functions
-    function dragStarted(event, d) {
-      if (!event.active) simulation.alphaTarget(0.3).restart()
-      d.fx = d.x
-      d.fy = d.y
-    }
-
-    function dragged(event, d) {
-      d.fx = event.x
-      d.fy = event.y
-    }
-
-    function dragEnded(event, d) {
-      if (!event.active) simulation.alphaTarget(0)
-      d.fx = null
-      d.fy = null
-    }
-
-    // Cleanup
-    return () => {
-      simulation.stop()
-      svg.selectAll('*').remove()
-    }
+    return () => { simulation.stop(); svg.selectAll('*').remove() }
   }, [nodes, connections, panX, panY, zoom, selectedNodeId])
 
   return (
