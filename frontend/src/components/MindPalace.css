@@ -11,13 +11,9 @@
   background-color: var(--bg-primary);
 }
 
-.mind-palace-svg .node {
+.mind-palace-svg .node-circle {
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.3));
-  transition: filter 0.2s ease;
-}
-
-.mind-palace-svg .node:hover {
-  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5));
+  transition: opacity 0.2s ease;
 }
 
 .mind-palace-svg .link {
@@ -28,15 +24,31 @@
   pointer-events: none;
 }
 
+.node-type-label {
+  pointer-events: none;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.node-sub-label {
+  pointer-events: none;
+}
+
 .node-preview {
   position: absolute;
   bottom: 20px;
   right: 20px;
-  max-width: 320px;
+  max-width: 340px;
   background-color: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 16px;
+  padding: 0;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   z-index: 10;
+  animation: slideIn 0.2s ease;
+  overflow: hidden;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
