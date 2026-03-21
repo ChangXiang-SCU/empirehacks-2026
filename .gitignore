@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.local
+*.db
+*.log
+.DS_Store
+.vscode/
+.idea/
+build/
+coverage/
+.parcel-cache/
