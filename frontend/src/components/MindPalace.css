@@ -1,54 +1,238 @@
+/* ===== Container ===== */
 .mind-palace-container {
   flex: 1;
   position: relative;
-  background-color: var(--bg-primary);
+  background: #08080d;
   overflow: hidden;
+  cursor: grab;
 }
 
-.mind-palace-svg {
+/* ===== Dot grid background ===== */
+.grid-bg {
+  position: absolute;
+  top: -30px;
+  left: -30px;
+  width: calc(100% + 60px);
+  height: calc(100% + 60px);
+  background-image: radial-gradient(circle, #1a1a2a 1px, transparent 1px);
+  background-size: 30px 30px;
+  pointer-events: none;
+  opacity: 0.4;
+  z-index: 0;
+}
+
+/* ===== Canvas (pan/zoom layer) ===== */
+.canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
-  background-color: var(--bg-primary);
+  z-index: 1;
 }
 
-.mind-palace-svg .node-circle {
-  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.3));
-  transition: opacity 0.2s ease;
-}
-
-.mind-palace-svg .link {
-  opacity: 0.6;
-}
-
-.link-label {
-  pointer-events: none;
-}
-
-.node-type-label {
-  pointer-events: none;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-}
-
-.node-sub-label {
-  pointer-events: none;
-}
-
-.node-preview {
+/* ===== SVG connections ===== */
+.connections-svg {
   position: absolute;
-  bottom: 20px;
-  right: 20px;
-  max-width: 340px;
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  z-index: 10;
-  animation: slideIn 0.2s ease;
-  overflow: hidden;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+  overflow: visible;
 }
 
-@keyframes slideIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+.connections-svg path {
+  transition: opacity 0.2s;
+}
+
+.connections-svg path.cross-project {
+  stroke-dasharray: 8, 4;
+}
+
+/* ===== Node cards ===== */
+.mind-node {
+  position: absolute;
+  border-radius: 12px;
+  cursor: grab;
+  z-index: 5;
+  transition: box-shadow 0.2s;
+  user-select: none;
+  min-width: 140px;
+  max-width: 200px;
+}
+
+.mind-node:hover {
+  z-index: 20 !important;
+  box-shadow: 0 0 20px rgba(102, 126, 234, 0.3);
+}
+
+.mind-node.selected {
+  z-index: 25 !important;
+  box-shadow: 0 0 30px rgba(102, 126, 234, 0.5);
+}
+
+.mind-node.shared {
+  outline: 2px dashed rgba(255, 255, 255, 0.3);
+  outline-offset: 3px;
+}
+
+/* Node header */
+.mind-node-header {
+  padding: 8px 12px;
+  border-radius: 12px 12px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.mind-node-type {
+  white-space: nowrap;
+}
+
+.mind-node-project {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* Node body */
+.mind-node-body {
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: #111119;
+  border-radius: 0 0 12px 12px;
+  border: 1px solid #1e1e2e;
+  border-top: none;
+}
+
+.mind-node-content {
+  color: #ccc;
+  word-wrap: break-word;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+/* Tags */
+.mind-node-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.mind-node-tag {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #666;
+}
+
+/* ===== DIKW type colors ===== */
+
+/* Data — blue */
+.d-node .mind-node-header {
+  background: linear-gradient(135deg, #283593, #3949ab);
+  color: #8c9eff;
+}
+.d-node .mind-node-body {
+  border-color: #283593;
+}
+.d-project {
+  background: rgba(92, 107, 192, 0.15);
+  color: #8c9eff;
+}
+
+/* Information — teal */
+.i-node .mind-node-header {
+  background: linear-gradient(135deg, #00695c, #00897b);
+  color: #80cbc4;
+}
+.i-node .mind-node-body {
+  border-color: #00695c;
+}
+.i-project {
+  background: rgba(0, 137, 123, 0.15);
+  color: #80cbc4;
+}
+
+/* Knowledge — orange */
+.k-node .mind-node-header {
+  background: linear-gradient(135deg, #e65100, #f57c00);
+  color: #ffe0b2;
+}
+.k-node .mind-node-body {
+  border-color: #e65100;
+}
+.k-project {
+  background: rgba(245, 124, 0, 0.15);
+  color: #ffb74d;
+}
+
+/* Wisdom — red */
+.w-node .mind-node-header {
+  background: linear-gradient(135deg, #b71c1c, #e53935);
+  color: #ffcdd2;
+}
+.w-node .mind-node-body {
+  border-color: #b71c1c;
+}
+.w-project {
+  background: rgba(229, 57, 53, 0.15);
+  color: #ef9a9a;
+}
+
+/* ===== Zoom controls ===== */
+.zoom-controls {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  z-index: 50;
+}
+
+.zoom-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid #1e1e2e;
+  background: #111119;
+  color: #888;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zoom-btn:hover {
+  background: #1a1a2e;
+  color: white;
+}
+
+.zoom-level {
+  padding: 0 8px;
+  font-size: 11px;
+  color: #555;
+  display: flex;
+  align-items: center;
+}
+
+.reset-btn {
+  font-size: 11px;
+  width: auto;
+  padding: 0 8px;
 }
