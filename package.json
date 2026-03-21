@@ -3,23 +3,13 @@
   "version": "0.1.0",
   "description": "Mnemosyne: Agent-agnostic knowledge management layer",
   "private": true,
-  "workspaces": [
-    "frontend",
-    "backend"
-  ],
   "scripts": {
-    "dev": "npm run dev --workspaces",
-    "build": "npm run build --workspaces",
-    "start": "npm run start --workspaces",
-    "frontend": "npm run dev -w frontend",
-    "backend": "npm run dev -w backend"
+    "frontend": "cd frontend && npx vite",
+    "backend": "cd backend && node server.js",
+    "build:frontend": "cd frontend && npx vite build",
+    "start": "cd backend && node server.js"
   },
-  "keywords": [
-    "knowledge-management",
-    "DIKW",
-    "agent",
-    "mcp"
-  ],
+  "keywords": ["knowledge-management", "DIKW", "agent", "mcp"],
   "author": "EmpireHacks 2026",
   "license": "MIT"
 }
