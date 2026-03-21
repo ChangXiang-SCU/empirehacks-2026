@@ -62,9 +62,16 @@ export default function MindPalace() {
     const gGroup = svg.append('g')
       .attr('transform', `translate(${panX},${panY})scale(${zoom})`)
 
+    // Map connections to D3 format (source/target instead of fromNodeId/toNodeId)
+    const links = connections.map(c => ({
+      ...c,
+      source: c.fromNodeId,
+      target: c.toNodeId
+    }))
+
     // Create force simulation
     const simulation = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(connections)
+      .force('link', d3.forceLink(links)
         .id(d => d.id)
         .distance(100)
         .strength(0.5)
@@ -77,7 +84,7 @@ export default function MindPalace() {
 
     // Draw links
     const linkSelection = gGroup.selectAll('.link')
-      .data(connections, d => d.id)
+      .data(links, d => d.id)
       .join('line')
       .attr('class', 'link')
       .attr('stroke', '#555')
@@ -94,7 +101,7 @@ export default function MindPalace() {
 
     // Draw link labels
     const labelSelection = gGroup.selectAll('.link-label')
-      .data(connections, d => `label_${d.id}`)
+      .data(links, d => `label_${d.id}`)
       .join('text')
       .attr('class', 'link-label')
       .text(d => d.label)
@@ -135,34 +142,14 @@ export default function MindPalace() {
     // Update simulation on each tick
     simulation.on('tick', () => {
       linkSelection
-        .attr('x1', d => {
-          const source = nodes.find(n => n.id === d.fromNodeId)
-          return source?.x || 0
-        })
-        .attr('y1', d => {
-          const source = nodes.find(n => n.id === d.fromNodeId)
-          return source?.y || 0
-        })
-        .attr('x2', d => {
-          const target = nodes.find(n => n.id === d.toNodeId)
-          return target?.x || 0
-        })
-        .attr('y2', d => {
-          const target = nodes.find(n => n.id === d.toNodeId)
-          return target?.y || 0
-        })
+        .attr('x1', d => d.source.x)
+        .attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x)
+        .attr('y2', d => d.target.y)
 
       labelSelection
-        .attr('x', d => {
-          const source = nodes.find(n => n.id === d.fromNodeId)
-          const target = nodes.find(n => n.id === d.toNodeId)
-          return (source?.x || 0 + target?.x || 0) / 2
-        })
-        .attr('y', d => {
-          const source = nodes.find(n => n.id === d.fromNodeId)
-          const target = nodes.find(n => n.id === d.toNodeId)
-          return (source?.y || 0 + target?.y || 0) / 2
-        })
+        .attr('x', d => (d.source.x + d.target.x) / 2)
+        .attr('y', d => (d.source.y + d.target.y) / 2)
 
       nodeSelection
         .attr('cx', d => d.x)
