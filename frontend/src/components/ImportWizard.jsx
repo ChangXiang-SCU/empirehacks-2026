@@ -5,11 +5,11 @@ import './ImportWizard.css'
 export default function ImportWizard() {
   const showImportWizard = useGraphStore((state) => state.showImportWizard)
   const setShowImportWizard = useGraphStore((state) => state.setShowImportWizard)
-  const importData = useGraphStore((state) => state.importData)
 
   const [dragActive, setDragActive] = useState(false)
   const [loading, setLoading] = useState(false)
   const [preview, setPreview] = useState(null)
+  const [error, setError] = useState(null)
 
   if (!showImportWizard) return null
 
@@ -35,6 +35,7 @@ export default function ImportWizard() {
 
   const handleFile = async (file) => {
     setLoading(true)
+    setError(null)
     try {
       const formData = new FormData()
       formData.append('file', file)
@@ -47,20 +48,29 @@ export default function ImportWizard() {
       if (response.ok) {
         const result = await response.json()
         setPreview(result)
+      } else {
+        const err = await response.json()
+        setError(err.error || 'Import failed')
       }
     } catch (error) {
       console.error('Import error:', error)
+      setError('Network error: ' + error.message)
     } finally {
       setLoading(false)
     }
   }
 
-  const handleConfirm = () => {
-    if (preview && preview.nodes && preview.connections) {
-      importData(preview.nodes, preview.connections)
-      setShowImportWizard(false)
-      setPreview(null)
-    }
+  const handleDone = () => {
+    // Graph is already updated via WebSocket broadcast from server
+    setShowImportWizard(false)
+    setPreview(null)
+    setError(null)
+  }
+
+  const handleClose = () => {
+    setShowImportWizard(false)
+    setPreview(null)
+    setError(null)
   }
 
   return (
@@ -68,13 +78,16 @@ export default function ImportWizard() {
       <div className="import-wizard">
         <div className="wizard-header">
           <h2>Import Data</h2>
-          <button className="close-btn" onClick={() => setShowImportWizard(false)}>×</button>
+          <button className="close-btn" onClick={handleClose}>×</button>
         </div>
 
         <div className="wizard-content">
           {!preview ? (
             <>
-              <p className="wizard-help">Import ChatGPT, Claude.ai, or Claude Code sessions</p>
+              <p className="wizard-help">
+                Import ChatGPT, Claude.ai, or Claude Code sessions.
+                Files are auto-parsed and transformed through the DIKW pipeline.
+              </p>
               <div
                 className={`drop-zone ${dragActive ? 'active' : ''}`}
                 onDragEnter={handleDrag}
@@ -85,7 +98,7 @@ export default function ImportWizard() {
                 <div className="drop-content">
                   <div className="drop-icon">📁</div>
                   <p>Drag and drop files here</p>
-                  <p className="drop-hint">or click to browse</p>
+                  <p className="drop-hint">.json (ChatGPT / Claude.ai) or .jsonl (Claude Code)</p>
                   <input
                     type="file"
                     accept=".json,.jsonl,.zip"
@@ -98,35 +111,52 @@ export default function ImportWizard() {
                   </label>
                 </div>
               </div>
+
+              {error && (
+                <div className="import-error">
+                  <p>{error}</p>
+                </div>
+              )}
             </>
           ) : (
-            <>
+            <div className="import-success">
+              <div className="success-icon">✓</div>
+              <h3>Import Complete</h3>
               <div className="preview-info">
-                <p>Detected platform: <strong>{preview.platform}</strong></p>
-                <p>Sessions found: <strong>{preview.sessions}</strong></p>
-                <p>Nodes to import: <strong>{preview.nodes?.length || 0}</strong></p>
+                <div className="preview-row">
+                  <span className="preview-label">Platform</span>
+                  <span className="preview-value">{preview.platform}</span>
+                </div>
+                <div className="preview-row">
+                  <span className="preview-label">Project</span>
+                  <span className="preview-value">{preview.projectName}</span>
+                </div>
+                <div className="preview-row">
+                  <span className="preview-label">Data nodes</span>
+                  <span className="preview-value">{preview.dataNodesCount}</span>
+                </div>
+                <div className="preview-row">
+                  <span className="preview-label">Auto-transformed</span>
+                  <span className="preview-value">+{preview.transformedNodesCount} nodes (I/K/W)</span>
+                </div>
+                <div className="preview-row">
+                  <span className="preview-label">Connections</span>
+                  <span className="preview-value">{preview.connectionsCount}</span>
+                </div>
               </div>
-              <div className="preview-actions">
-                <button
-                  className="btn cancel-btn"
-                  onClick={() => setPreview(null)}
-                >
-                  Back
-                </button>
-                <button
-                  className="btn confirm-btn"
-                  onClick={handleConfirm}
-                >
-                  Confirm Import
-                </button>
-              </div>
-            </>
+              <p className="pipeline-note">
+                D → I → K → W pipeline ran automatically
+              </p>
+              <button className="btn confirm-btn" onClick={handleDone}>
+                View in Mind Palace
+              </button>
+            </div>
           )}
 
           {loading && (
             <div className="loading-overlay">
               <div className="spinner"></div>
-              <p>Processing...</p>
+              <p>Importing & transforming...</p>
             </div>
           )}
         </div>

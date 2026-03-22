@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useCallback } from 'react'
 import { useGraphStore } from './stores/graphStore'
 import MindPalace from './components/MindPalace'
 import Sidebar from './components/Sidebar'
@@ -12,24 +12,25 @@ function App() {
   const setConnections = useGraphStore((state) => state.setConnections)
   const setProjects = useGraphStore((state) => state.setProjects)
   const setMcpSources = useGraphStore((state) => state.setMcpSources)
+  const addNode = useGraphStore((state) => state.addNode)
+  const addConnection = useGraphStore((state) => state.addConnection)
+
+  const loadGraph = useCallback(async () => {
+    try {
+      const response = await fetch('/api/graph')
+      if (response.ok) {
+        const data = await response.json()
+        setNodes(data.nodes || [])
+        setConnections(data.connections || [])
+        setProjects(data.projects || [])
+        setMcpSources(data.mcpSources || [])
+      }
+    } catch (error) {
+      console.error('Failed to load graph:', error)
+    }
+  }, [setNodes, setConnections, setProjects, setMcpSources])
 
   useEffect(() => {
-    // Load initial graph data from backend
-    const loadGraph = async () => {
-      try {
-        const response = await fetch('/api/graph')
-        if (response.ok) {
-          const data = await response.json()
-          setNodes(data.nodes || [])
-          setConnections(data.connections || [])
-          setProjects(data.projects || [])
-          setMcpSources(data.mcpSources || [])
-        }
-      } catch (error) {
-        console.error('Failed to load graph:', error)
-      }
-    }
-
     loadGraph()
 
     // Setup WebSocket for real-time updates
@@ -38,21 +39,38 @@ function App() {
 
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data)
-        if (data.type === 'node:added') {
-          // Handle new node
-        } else if (data.type === 'connection:added') {
-          // Handle new connection
+        const message = JSON.parse(event.data)
+
+        if (message.type === 'graph:updated' || message.type === 'import:completed') {
+          // Full graph refresh — server sent complete graph data
+          const data = message.data
+          if (data) {
+            setNodes(data.nodes || [])
+            setConnections(data.connections || [])
+            setProjects(data.projects || [])
+            setMcpSources(data.mcpSources || [])
+          }
+        } else if (message.type === 'node:added' && message.data) {
+          addNode(message.data)
+        } else if (message.type === 'connection:added' && message.data) {
+          addConnection(message.data)
         }
       } catch (error) {
         console.error('WebSocket message error:', error)
       }
     }
 
+    ws.onclose = () => {
+      console.log('WebSocket disconnected, will reload graph on reconnect')
+      setTimeout(() => {
+        loadGraph()
+      }, 3000)
+    }
+
     return () => {
       ws.close()
     }
-  }, [setNodes, setConnections, setProjects, setMcpSources])
+  }, [loadGraph, addNode, addConnection, setNodes, setConnections, setProjects, setMcpSources])
 
   return (
     <div className="app-container">

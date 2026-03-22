@@ -1,19 +1,47 @@
 #!/bin/bash
-# Claude Code session-start hook
-# Loads relevant Knowledge and Wisdom context when session begins
+# Mnemosyne — Claude Code Session Start Hook
+# Loads relevant Knowledge and Wisdom context when a new session begins.
+# This gives the agent "memory" of past learnings.
+#
+# Install: Copy to ~/.claude/hooks/session-start.sh
 
-SESSION_ID="${CLAUDE_SESSION_ID:-unknown}"
-PROJECT_HINT="${1:-unknown}"
+MNEMOSYNE_URL="${MNEMOSYNE_URL:-http://localhost:3001}"
+PROJECT_HINT="${1:-}"
 
-# Fetch relevant knowledge from Mnemosyne
-KNOWLEDGE=$(curl -s -X GET "http://localhost:3001/api/nodes?type=K&project=$PROJECT_HINT" 2>/dev/null)
+# Fetch Knowledge nodes (skills) relevant to this session
+if [ -n "$PROJECT_HINT" ]; then
+  KNOWLEDGE=$(curl -s "${MNEMOSYNE_URL}/api/nodes?type=K&project=${PROJECT_HINT}" 2>/dev/null)
+  WISDOM=$(curl -s "${MNEMOSYNE_URL}/api/nodes?type=W&project=${PROJECT_HINT}" 2>/dev/null)
+else
+  KNOWLEDGE=$(curl -s "${MNEMOSYNE_URL}/api/nodes?type=K" 2>/dev/null)
+  WISDOM=$(curl -s "${MNEMOSYNE_URL}/api/nodes?type=W" 2>/dev/null)
+fi
 
-# Save to temporary context file if available
-if [ ! -z "$KNOWLEDGE" ]; then
-  CONTEXT_FILE="/tmp/mnemosyne_context_${SESSION_ID}.txt"
-  echo "# Relevant Skills for this session:" > "$CONTEXT_FILE"
-  echo "$KNOWLEDGE" >> "$CONTEXT_FILE"
-  echo "Context loaded: $CONTEXT_FILE"
+# Output context for Claude to read
+if [ ! -z "$KNOWLEDGE" ] && [ "$KNOWLEDGE" != "[]" ]; then
+  echo "# Mnemosyne Knowledge Context"
+  echo "## Skills from past sessions:"
+  echo "$KNOWLEDGE" | python3 -c "
+import sys, json
+try:
+    nodes = json.load(sys.stdin)
+    for n in nodes[:5]:
+        print(f\"- {n.get('content', '')[:200]}\")
+except: pass
+" 2>/dev/null
+fi
+
+if [ ! -z "$WISDOM" ] && [ "$WISDOM" != "[]" ]; then
+  echo ""
+  echo "## Wisdom (meta-judgment):"
+  echo "$WISDOM" | python3 -c "
+import sys, json
+try:
+    nodes = json.load(sys.stdin)
+    for n in nodes[:3]:
+        print(f\"- {n.get('content', '')[:200]}\")
+except: pass
+" 2>/dev/null
 fi
 
 exit 0
