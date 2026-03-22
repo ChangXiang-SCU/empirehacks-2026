@@ -80,14 +80,6 @@ function generateId() {
   return 'node_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
 }
 
-// Parse tags from string or array
-function parseTags(tags) {
-  if (!tags) return []
-  if (Array.isArray(tags)) return tags
-  if (typeof tags === 'string') return tags.split(',').map(t => t.trim()).filter(t => t)
-  return []
-}
-
 // Serialize tags to JSON string
 function serializeTags(tags) {
   return tags && tags.length > 0 ? JSON.stringify(tags) : null
@@ -177,23 +169,31 @@ function handleToolsList() {
   }
 }
 
-// Handle tools/call request
+// Handle tools/call request — wraps result in MCP content format
 function handleToolsCall(params) {
   const { name, arguments: args } = params
 
+  let rawResult
   switch (name) {
     case 'query_knowledge':
-      return handleQueryKnowledge(args)
+      rawResult = handleQueryKnowledge(args); break
     case 'get_skill':
-      return handleGetSkill(args)
+      rawResult = handleGetSkill(args); break
     case 'record_learning':
-      return handleRecordLearning(args)
+      rawResult = handleRecordLearning(args); break
     case 'recommend_for_project':
-      return handleRecommendForProject(args)
+      rawResult = handleRecommendForProject(args); break
     case 'search_knowledge':
-      return handleSearchKnowledge(args)
+      rawResult = handleSearchKnowledge(args); break
     default:
       throw new Error(`Unknown tool: ${name}`)
+  }
+
+  // MCP protocol requires tools/call to return { content: [...] }
+  return {
+    content: [
+      { type: 'text', text: JSON.stringify(rawResult, null, 2) }
+    ]
   }
 }
 
@@ -419,7 +419,6 @@ async function main() {
 
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stdout,
     terminal: false
   })
 
