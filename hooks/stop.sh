@@ -1,6 +1,6 @@
 #!/bin/bash
-# Mnemosyne — Claude Code Stop Hook
-# When a session ends, triggers D→I transformation on accumulated Data nodes.
+# Mnemosyne \u2014 Claude Code Stop Hook
+# When a session ends, triggers D\u2192I transformation on accumulated Data nodes.
 #
 # Install: Copy to ~/.claude/hooks/stop.sh
 
@@ -8,7 +8,7 @@ MNEMOSYNE_URL="${MNEMOSYNE_URL:-http://localhost:3001}"
 SESSION_ID="${CLAUDE_SESSION_ID:-$(date +%Y%m%d_%H%M%S)}"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# Trigger D→I reflection
+# Trigger D\u2192I reflection
 curl -s -X POST "${MNEMOSYNE_URL}/api/hook/session-end" \
   -H "Content-Type: application/json" \
   -d "{

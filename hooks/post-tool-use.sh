@@ -1,5 +1,5 @@
 #!/bin/bash
-# Mnemosyne — Claude Code PostToolUse Hook
+# Mnemosyne \u2014 Claude Code PostToolUse Hook
 # Captures every tool call as a Data node in the knowledge graph.
 #
 # Install: Copy to ~/.claude/hooks/post-tool-use.sh

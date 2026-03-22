@@ -8,7 +8,7 @@ export function startFileWatcher(onSessionDetected) {
   const openclawPath = path.join(homeDir, '.openclaw')
 
   const watcher = chokidar.watch([claudePath, openclawPath], {
-    ignored: /(^|[\/\\])\./, 
+    ignored: /(^|[\/\\])\./,
     persistent: true,
     usePolling: false
   })
@@ -27,7 +27,7 @@ export function startFileWatcher(onSessionDetected) {
       console.error('File watcher error:', error)
     })
 
-  console.log('✓ File watcher started for .claude and .openclaw')
+  console.log('\u2713 File watcher started for .claude and .openclaw')
 
   return watcher
 }
@@ -35,6 +35,6 @@ export function startFileWatcher(onSessionDetected) {
 export function stopFileWatcher(watcher) {
   if (watcher) {
     watcher.close()
-    console.log('✓ File watcher stopped')
+    console.log('\u2713 File watcher stopped')
   }
 }

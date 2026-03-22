@@ -41,6 +41,7 @@ export function transformDataToInfo(dataNodes, projectContext = {}) {
     parts.push(`Files involved: ${uniqueFiles.slice(0, 5).join(', ')}`)
   }
   if (messages.length > 0) {
+    // Extract first meaningful user message as topic hint
     const firstMsg = messages[0]?.content?.replace(/^\[user\]\s*/i, '').slice(0, 120)
     if (firstMsg) parts.push(`Topic: "${firstMsg}"`)
   }
@@ -63,6 +64,7 @@ export function transformDataToInfo(dataNodes, projectContext = {}) {
     createdAt: new Date().toISOString()
   }
 
+  // Create connections from source Data nodes to this Info node
   const connections = dataNodes.slice(0, 8).map(dNode => ({
     id: `conn_${dNode.id}_${infoId}`,
     fromNodeId: dNode.id,
@@ -77,14 +79,17 @@ export function transformDataToInfo(dataNodes, projectContext = {}) {
 export function transformInfoToKnowledge(infoNodes, projectContext = {}) {
   if (!infoNodes.length) return { node: null, connections: [] }
 
+  // Analyze information nodes to find cross-cutting patterns
   const allContent = infoNodes.map(n => n.content).join(' ')
   const allTags = infoNodes.flatMap(n => n.tags || [])
 
+  // Detect recurring themes
   const themes = detectThemes(allContent)
   const workflows = allTags.filter(t =>
     ['debug-fix', 'build-test', 'explore-implement', 'research-write', 'refactor'].includes(t)
   )
 
+  // Build knowledge statement
   const parts = []
 
   if (workflows.length > 0) {
@@ -103,13 +108,15 @@ export function transformInfoToKnowledge(infoNodes, projectContext = {}) {
     parts.push(`Key techniques: ${themes.slice(0, 3).join(', ')}`)
   }
 
+  // Extract tool-specific skills
   const toolMentions = allContent.match(/Primary tool:\s*(\w+)/g) || []
   const tools = toolMentions.map(m => m.replace('Primary tool: ', ''))
   if (tools.length > 0) {
     const uniqueToolSet = [...new Set(tools)]
-    parts.push(`Tooling preference: ${uniqueToolSet.join(', ')} — effective for this type of task`)
+    parts.push(`Tooling preference: ${uniqueToolSet.join(', ')} \u2014 effective for this type of task`)
   }
 
+  // Add session count context
   parts.push(`Synthesized from ${infoNodes.length} session insights`)
 
   const knowId = `know_${uuidv4()}`
@@ -142,19 +149,23 @@ export function transformKnowledgeToWisdom(knowledgeNodes, projectContext = {}) 
 
   const allContent = knowledgeNodes.map(n => n.content).join(' ')
 
+  // Build wisdom \u2014 when to apply vs when NOT to apply
   const parts = []
 
+  // Identify constraints
   const hasTimeConstraint = allContent.match(/time|deadline|hours|minutes|sprint|hackathon/i)
   const hasScaleConstraint = allContent.match(/scale|performance|large|production/i)
   const hasTeamConstraint = allContent.match(/team|collaborate|review|pair/i)
 
   parts.push(`From ${knowledgeNodes.length} knowledge patterns:`)
 
+  // Extract the core skills
   knowledgeNodes.forEach((kNode, i) => {
     const shortSkill = kNode.content.split('.')[0].slice(0, 100)
     parts.push(`(${i + 1}) ${shortSkill}`)
   })
 
+  // Generate applicability judgment
   const constraints = []
   if (hasTimeConstraint) constraints.push('Under time pressure, prioritize shipping over optimization')
   if (hasScaleConstraint) constraints.push('At scale, invest in architecture over quick fixes')
@@ -194,6 +205,7 @@ export function transformKnowledgeToWisdom(knowledgeNodes, projectContext = {}) 
 export function autoTransformBatch(dataNodes, projectContext = {}) {
   const results = { nodes: [], connections: [] }
 
+  // Step 1: D \u2192 I (group data nodes into chunks of ~10 for one Info node)
   const chunkSize = Math.max(5, Math.ceil(dataNodes.length / 3))
   const chunks = []
   for (let i = 0; i < dataNodes.length; i += chunkSize) {
@@ -210,12 +222,14 @@ export function autoTransformBatch(dataNodes, projectContext = {}) {
     }
   })
 
+  // Step 2: I \u2192 K (if we have 2+ info nodes, synthesize knowledge)
   if (infoNodes.length >= 2) {
     const { node: kNode, connections: kConns } = transformInfoToKnowledge(infoNodes, projectContext)
     if (kNode) {
       results.nodes.push(kNode)
       results.connections.push(...kConns)
 
+      // Step 3: K \u2192 W (generate wisdom from knowledge)
       const { node: wNode, connections: wConns } = transformKnowledgeToWisdom([kNode], projectContext)
       if (wNode) {
         results.nodes.push(wNode)
@@ -279,6 +293,7 @@ export function generateSkillMd(knowledgeNode, relatedNodes = []) {
     lines.push('')
   }
 
+  // Add source context from related Data/Info nodes
   const dataNodes = relatedNodes.filter(n => n.type === 'D')
   const infoNodes = relatedNodes.filter(n => n.type === 'I')
   const wisdomNodes = relatedNodes.filter(n => n.type === 'W')
@@ -314,7 +329,7 @@ export function generateSkillMd(knowledgeNode, relatedNodes = []) {
 // ── Export: Generate CLAUDE.md from Wisdom nodes ──
 export function generateClaudeMd(wisdomNodes, projectName = 'Project') {
   const lines = []
-  lines.push(`# ${projectName} — Wisdom Context`)
+  lines.push(`# ${projectName} \u2014 Wisdom Context`)
   lines.push('')
   lines.push('Use this context to guide decision-making in this project.')
   lines.push('')

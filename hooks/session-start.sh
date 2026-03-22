@@ -1,5 +1,5 @@
 #!/bin/bash
-# Mnemosyne — Claude Code Session Start Hook
+# Mnemosyne \u2014 Claude Code Session Start Hook
 # Loads relevant Knowledge and Wisdom context when a new session begins.
 # This gives the agent "memory" of past learnings.
 #
