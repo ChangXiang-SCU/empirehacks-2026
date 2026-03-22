@@ -21,6 +21,8 @@ import {
   generateSkillMd,
   generateClaudeMd
 } from './lib/dikwEngine.js'
+import { recommendForProject, recommendOnImport } from './lib/recommendEngine.js'
+import { startFileWatcher } from './lib/fileWatcher.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -33,7 +35,7 @@ const upload = multer({ storage: multer.memoryStorage() })
 const PORT = process.env.BACKEND_PORT || 3001
 const DB_PATH = join(__dirname, 'db', 'mnemosyne.db')
 
-// ── Database helpers (sql.js) ──
+// \u2500\u2500 Database helpers (sql.js) \u2500\u2500
 let db = null
 
 function dbAll(sql, params = []) {
@@ -62,17 +64,17 @@ function saveDb() {
   fs.writeFileSync(DB_PATH, buffer)
 }
 
-// ── Initialize ──
+// \u2500\u2500 Initialize \u2500\u2500
 async function initializeDatabase() {
   const SQL = await initSqlJs()
 
   if (fs.existsSync(DB_PATH)) {
     const fileBuffer = fs.readFileSync(DB_PATH)
     db = new SQL.Database(fileBuffer)
-    console.log('✓ Loaded existing database')
+    console.log('\u2713 Loaded existing database')
   } else {
     db = new SQL.Database()
-    console.log('✓ Created new database')
+    console.log('\u2713 Created new database')
   }
 
   const schema = fs.readFileSync(join(__dirname, 'db/schema.sql'), 'utf-8')
@@ -124,13 +126,13 @@ function seedDatabase() {
       )
     })
 
-    console.log('✓ Database seeded with demo data')
+    console.log('\u2713 Database seeded with demo data')
   } catch (error) {
     console.error('Error seeding database:', error)
   }
 }
 
-// ── Helpers ──
+// \u2500\u2500 Helpers \u2500\u2500
 function getGraph() {
   const nodes = dbAll('SELECT * FROM nodes').map(row => ({
     id: row.id, type: row.type, projectId: row.project_id,
@@ -182,7 +184,7 @@ function insertConnectionToDb(conn) {
   )
 }
 
-// ── Routes ──
+// \u2500\u2500 Routes \u2500\u2500
 app.use(express.json())
 app.use(express.static(join(__dirname, '../frontend/dist')))
 
@@ -194,7 +196,7 @@ app.use((req, res, next) => {
   next()
 })
 
-// ── GET /api/graph ──
+// \u2500\u2500 GET /api/graph \u2500\u2500
 app.get('/api/graph', (req, res) => {
   try {
     res.json(getGraph())
@@ -204,7 +206,7 @@ app.get('/api/graph', (req, res) => {
   }
 })
 
-// ── POST /api/import — Import file + auto-transform ──
+// \u2500\u2500 POST /api/import \u2014 Import file + auto-transform \u2500\u2500
 app.post('/api/import', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file provided' })
 
@@ -249,7 +251,7 @@ app.post('/api/import', upload.single('file'), async (req, res) => {
       insertNodeToDb(node)
     })
 
-    // Auto-transform: D → I → K → W
+    // Auto-transform: D \u2192 I \u2192 K \u2192 W
     const transformed = autoTransformBatch(dataNodes, { id: projectId, name: projectName })
     transformed.nodes.forEach(node => {
       node.projectId = projectId
@@ -271,7 +273,8 @@ app.post('/api/import', upload.single('file'), async (req, res) => {
       dataNodesCount: dataNodes.length,
       transformedNodesCount: transformed.nodes.length,
       connectionsCount: transformed.connections.length,
-      totalNodes: dataNodes.length + transformed.nodes.length
+      totalNodes: dataNodes.length + transformed.nodes.length,
+      recommendations: recommendOnImport(db, dataNodes, projectId, 5)
     })
   } catch (error) {
     console.error('Import error:', error)
@@ -279,15 +282,17 @@ app.post('/api/import', upload.single('file'), async (req, res) => {
   }
 })
 
-// ── POST /api/transform — Manual DIKW transformation ──
+// \u2500\u2500 POST /api/transform \u2014 Manual DIKW transformation \u2500\u2500
 app.post('/api/transform', (req, res) => {
   try {
     const { nodeIds, direction } = req.body
+    // direction: 'D\u2192I', 'I\u2192K', 'K\u2192W', or 'auto'
 
     if (!nodeIds || !nodeIds.length) {
       return res.status(400).json({ error: 'No node IDs provided' })
     }
 
+    // Fetch source nodes from DB
     const placeholders = nodeIds.map(() => '?').join(',')
     const sourceNodes = dbAll(`SELECT * FROM nodes WHERE id IN (${placeholders})`, nodeIds)
       .map(row => ({
@@ -307,6 +312,7 @@ app.post('/api/transform', (req, res) => {
     const projectContext = { id: sourceNodes[0].projectId }
 
     if (direction === 'auto' || !direction) {
+      // Auto-detect based on source node type
       if (sourceType === 'D') result = transformDataToInfo(sourceNodes, projectContext)
       else if (sourceType === 'I') result = transformInfoToKnowledge(sourceNodes, projectContext)
       else if (sourceType === 'K') result = transformKnowledgeToWisdom(sourceNodes, projectContext)
@@ -323,14 +329,18 @@ app.post('/api/transform', (req, res) => {
       return res.status(400).json({ error: 'Transformation produced no result' })
     }
 
+    // Save to DB
     insertNodeToDb(result.node)
     result.connections.forEach(conn => insertConnectionToDb(conn))
     saveDb()
 
+    // Broadcast
     broadcastToClients({ type: 'node:added', data: result.node })
     result.connections.forEach(conn => {
       broadcastToClients({ type: 'connection:added', data: conn })
     })
+
+    // Also broadcast full graph for simpler client-side handling
     broadcastToClients({ type: 'graph:updated', data: getGraph() })
 
     res.json({
@@ -344,7 +354,7 @@ app.post('/api/transform', (req, res) => {
   }
 })
 
-// ── POST /api/export/skill/:nodeId — Export Knowledge node as SKILL.md ──
+// \u2500\u2500 POST /api/export/skill/:nodeId \u2014 Export Knowledge node as SKILL.md \u2500\u2500
 app.post('/api/export/skill/:nodeId', (req, res) => {
   try {
     const { nodeId } = req.params
@@ -360,6 +370,7 @@ app.post('/api/export/skill/:nodeId', (req, res) => {
       sourcePlatform: node.source_platform
     }
 
+    // Find related nodes via connections
     const relatedIds = dbAll(
       'SELECT from_node_id FROM connections WHERE to_node_id = ?', [nodeId]
     ).map(r => r.from_node_id)
@@ -389,7 +400,7 @@ app.post('/api/export/skill/:nodeId', (req, res) => {
   }
 })
 
-// ── POST /api/export/claude/:projectId — Export Wisdom as CLAUDE.md ──
+// \u2500\u2500 POST /api/export/claude/:projectId \u2014 Export Wisdom as CLAUDE.md \u2500\u2500
 app.post('/api/export/claude/:projectId', (req, res) => {
   try {
     const { projectId } = req.params
@@ -414,7 +425,20 @@ app.post('/api/export/claude/:projectId', (req, res) => {
   }
 })
 
-// ── POST /api/classify ──
+// \u2500\u2500 GET /api/recommend/:projectId \u2014 Cross-project knowledge recommendations \u2500\u2500
+app.get('/api/recommend/:projectId', (req, res) => {
+  try {
+    const { projectId } = req.params
+    const limit = parseInt(req.query.limit) || 5
+    const recommendations = recommendForProject(db, projectId, limit)
+    res.json({ projectId, recommendations })
+  } catch (error) {
+    console.error('Recommend error:', error)
+    res.status(500).json({ error: 'Recommendation failed' })
+  }
+})
+
+// \u2500\u2500 POST /api/classify \u2500\u2500
 app.post('/api/classify', (req, res) => {
   try {
     const { sessionId, projectId } = req.body
@@ -427,7 +451,7 @@ app.post('/api/classify', (req, res) => {
   }
 })
 
-// ── POST /api/hook/tool-use — Claude Code hook: log tool call ──
+// \u2500\u2500 POST /api/hook/tool-use \u2014 Claude Code hook: log tool call \u2500\u2500
 app.post('/api/hook/tool-use', (req, res) => {
   try {
     const { tool, session, timestamp, input, project } = req.body
@@ -459,11 +483,12 @@ app.post('/api/hook/tool-use', (req, res) => {
   }
 })
 
-// ── POST /api/hook/session-end — Trigger D→I reflection ──
+// \u2500\u2500 POST /api/hook/session-end \u2014 Trigger D\u2192I reflection \u2500\u2500
 app.post('/api/hook/session-end', (req, res) => {
   try {
     const { session, timestamp } = req.body
 
+    // Find all Data nodes from this session that haven't been transformed yet
     const dataNodes = dbAll(
       `SELECT * FROM nodes WHERE project_id = ? AND type = 'D'
        AND id NOT IN (SELECT from_node_id FROM connections WHERE label = 'contextualizes')`,
@@ -479,6 +504,7 @@ app.post('/api/hook/session-end', (req, res) => {
       return res.json({ success: true, message: 'Not enough data nodes to transform', count: dataNodes.length })
     }
 
+    // Auto-transform
     const result = transformDataToInfo(dataNodes, { id: session || 'live-session' })
     if (result.node) {
       insertNodeToDb(result.node)
@@ -494,7 +520,7 @@ app.post('/api/hook/session-end', (req, res) => {
   }
 })
 
-// ── GET /api/nodes — Query nodes with filters ──
+// \u2500\u2500 GET /api/nodes \u2014 Query nodes with filters \u2500\u2500
 app.get('/api/nodes', (req, res) => {
   try {
     const { type, project } = req.query
@@ -513,7 +539,7 @@ app.get('/api/nodes', (req, res) => {
   }
 })
 
-// ── GET /api/stats — Dashboard stats ──
+// \u2500\u2500 GET /api/stats \u2014 Dashboard stats \u2500\u2500
 app.get('/api/stats', (req, res) => {
   try {
     const totalNodes = dbGet('SELECT COUNT(*) as count FROM nodes')?.count || 0
@@ -530,7 +556,7 @@ app.get('/api/stats', (req, res) => {
   }
 })
 
-// ── MCP Server endpoint (for external agents to query) ──
+// \u2500\u2500 MCP Server endpoint (for external agents to query) \u2500\u2500
 app.post('/api/mcp', (req, res) => {
   try {
     const { method, params } = req.body
@@ -605,13 +631,46 @@ app.get('*', (req, res) => {
   else res.status(404).json({ error: 'Frontend not built yet. Run: npm run build -w frontend' })
 })
 
-// ── Start ──
+// \u2500\u2500 Start \u2500\u2500
 initializeDatabase().then(() => {
   server.listen(PORT, () => {
-    console.log(`✓ Mnemosyne backend running on http://localhost:${PORT}`)
-    console.log(`✓ WebSocket ready`)
-    console.log(`✓ DIKW transform engine loaded`)
-    console.log(`✓ MCP endpoint at POST /api/mcp`)
+    console.log(`\u2713 Mnemosyne backend running on http://localhost:${PORT}`)
+    console.log(`\u2713 WebSocket ready`)
+    console.log(`\u2713 DIKW transform engine loaded`)
+    console.log(`\u2713 MCP endpoint at POST /api/mcp`)
+    console.log(`\u2713 Recommendation engine loaded`)
+
+    // Start file watcher for auto-capture
+    try {
+      startFileWatcher((session) => {
+        console.log(`\ud83d\udce1 Detected new session: ${session.path}`)
+        try {
+          const content = fs.readFileSync(session.path, 'utf-8')
+          let dataNodes = []
+          if (session.type === 'claude-code') {
+            dataNodes = importClaudeCode(content)
+          }
+          if (dataNodes.length > 0) {
+            const now = new Date().toISOString()
+            const projectId = 'project_live_' + Date.now()
+            dbRun('INSERT OR IGNORE INTO projects (id, name, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+              [projectId, `Live: ${session.type}`, '#667eea', now, now])
+            dataNodes.forEach(node => { node.projectId = projectId; insertNodeToDb(node) })
+            const transformed = autoTransformBatch(dataNodes, { id: projectId })
+            transformed.nodes.forEach(node => { node.projectId = projectId; insertNodeToDb(node) })
+            transformed.connections.forEach(conn => insertConnectionToDb(conn))
+            saveDb()
+            broadcastToClients({ type: 'graph:updated', data: getGraph() })
+            console.log(`\u2713 Auto-imported ${dataNodes.length} nodes from ${session.path}`)
+          }
+        } catch (e) {
+          console.error('Auto-import error:', e.message)
+        }
+      })
+      console.log(`\u2713 File watcher active (monitoring ~/.claude/ and ~/.openclaw/)`)
+    } catch (e) {
+      console.log(`\u26a0 File watcher skipped: ${e.message}`)
+    }
   })
 }).catch(err => {
   console.error('Failed to initialize database:', err)
