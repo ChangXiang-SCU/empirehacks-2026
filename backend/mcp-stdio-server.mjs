@@ -33,6 +33,7 @@ function initializeSchema() {
         type TEXT NOT NULL CHECK(type IN ('D', 'I', 'K', 'W')),
         tags TEXT,
         project_id TEXT,
+        source_platform TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
@@ -235,10 +236,11 @@ function handleGetSkill(args) {
 function handleRecordLearning(args) {
   const id = generateId()
   const tags = serializeTags(args.tags || [])
+  const now = new Date().toISOString()
 
   dbRun(
-    `INSERT INTO nodes (id, content, type, tags, project_id) VALUES (?, ?, ?, ?, ?)`,
-    [id, args.content, args.type, tags, args.project || 'mcp-input']
+    `INSERT INTO nodes (id, content, type, tags, project_id, source_platform, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, args.content, args.type, tags, args.project || 'mcp-input', 'mcp-agent', now, now]
   )
   saveDb()
 
