@@ -1,93 +1,53 @@
-import initSqlJs from 'sql.js'
-import fs from 'fs'
-import { dirname, join } from 'path'
-import { fileURLToPath } from 'url'
-import readline from 'readline'
+#!/usr/bin/env node
+// Mnemosyne MCP Stdio Server — Proxy Mode
+// Instead of loading sql.js/WASM directly (which crashes in Claude Desktop),
+// this server proxies all tool calls to the HTTP backend at localhost:3001.
+// This avoids WASM loading issues and DB lock conflicts.
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const DB_PATH = join(__dirname, 'db', 'mnemosyne.db')
+import { createInterface } from 'readline'
+import http from 'http'
 
-let db = null
+const BACKEND_URL = 'http://127.0.0.1:3001'
 
-// Initialize database connection
-async function initDb() {
-  const SQL = await initSqlJs({
-    locateFile: file => join(__dirname, 'node_modules', 'sql.js', 'dist', file)
+process.stderr.write('[mnemosyne-mcp] Starting proxy MCP server...\n')
+process.stderr.write(`[mnemosyne-mcp] Backend URL: ${BACKEND_URL}\n`)
+
+// ── HTTP helper: POST JSON to backend ──
+function postToBackend(path, body) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body)
+    const url = new URL(path, BACKEND_URL)
+
+    const req = http.request({
+      hostname: url.hostname,
+      port: url.port,
+      path: url.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data)
+      }
+    }, (res) => {
+      let body = ''
+      res.on('data', chunk => { body += chunk })
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body))
+        } catch (e) {
+          resolve({ error: body })
+        }
+      })
+    })
+    req.on('error', (e) => {
+      reject(new Error(`Backend unreachable: ${e.message}`))
+    })
+    req.write(data)
+    req.end()
   })
-  try {
-    const fileBuffer = fs.readFileSync(DB_PATH)
-    db = new SQL.Database(fileBuffer)
-  } catch (e) {
-    // Database doesn't exist yet, create empty one
-    db = new SQL.Database()
-    initializeSchema()
-    saveDb()
-  }
 }
 
-// Initialize database schema if needed
-function initializeSchema() {
-  try {
-    db.run(`
-      CREATE TABLE IF NOT EXISTS nodes (
-        id TEXT PRIMARY KEY,
-        content TEXT NOT NULL,
-        type TEXT NOT NULL CHECK(type IN ('D', 'I', 'K', 'W')),
-        tags TEXT,
-        project_id TEXT,
-        source_platform TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `)
-  } catch (e) {
-    // Schema may already exist
-  }
-}
+// ── MCP Protocol Handlers ──
 
-// Execute a query and return all rows
-function dbAll(sql, params = []) {
-  const stmt = db.prepare(sql)
-  if (params.length) stmt.bind(params)
-  const rows = []
-  while (stmt.step()) {
-    rows.push(stmt.getAsObject())
-  }
-  stmt.free()
-  return rows
-}
-
-// Execute a query and return first row
-function dbGet(sql, params = []) {
-  const rows = dbAll(sql, params)
-  return rows[0] || null
-}
-
-// Execute an update/insert/delete
-function dbRun(sql, params = []) {
-  const stmt = db.prepare(sql)
-  if (params.length) stmt.bind(params)
-  stmt.step()
-  stmt.free()
-}
-
-// Save database to file
-function saveDb() {
-  const data = db.export()
-  fs.writeFileSync(DB_PATH, Buffer.from(data))
-}
-
-// Generate a simple ID
-function generateId() {
-  return 'node_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
-}
-
-// Serialize tags to JSON string
-function serializeTags(tags) {
-  return tags && tags.length > 0 ? JSON.stringify(tags) : null
-}
-
-// Handle initialize request
 function handleInitialize() {
   return {
     protocolVersion: '2024-11-05',
@@ -102,7 +62,6 @@ function handleInitialize() {
   }
 }
 
-// Handle tools/list request
 function handleToolsList() {
   return {
     tools: [
@@ -131,13 +90,13 @@ function handleToolsList() {
       },
       {
         name: 'record_learning',
-        description: 'Record a new learning/insight into the graph',
+        description: 'Record a new learning/insight into the knowledge graph',
         inputSchema: {
           type: 'object',
           properties: {
             content: { type: 'string', description: 'The learning content' },
             type: { type: 'string', enum: ['D', 'I', 'K', 'W'], description: 'Node type' },
-            tags: { type: 'array', items: { type: 'string' }, description: 'Tags for the node' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Tags' },
             project: { type: 'string', description: 'Project this belongs to' }
           },
           required: ['content', 'type']
@@ -157,7 +116,7 @@ function handleToolsList() {
       },
       {
         name: 'search_knowledge',
-        description: 'Full-text search across all knowledge',
+        description: 'Full-text search across all knowledge nodes',
         inputSchema: {
           type: 'object',
           properties: {
@@ -171,111 +130,80 @@ function handleToolsList() {
   }
 }
 
-// Handle tools/call request \u2014 wraps result in MCP content format
-function handleToolsCall(params) {
-  const { name, arguments: args } = params
-
-  let rawResult
-  switch (name) {
-    case 'query_knowledge':
-      rawResult = handleQueryKnowledge(args); break
-    case 'get_skill':
-      rawResult = handleGetSkill(args); break
-    case 'record_learning':
-      rawResult = handleRecordLearning(args); break
-    case 'recommend_for_project':
-      rawResult = handleRecommendForProject(args); break
-    case 'search_knowledge':
-      rawResult = handleSearchKnowledge(args); break
-    default:
-      throw new Error(`Unknown tool: ${name}`)
-  }
-
-  // MCP protocol requires tools/call to return { content: [...] }
-  return {
-    content: [
-      { type: 'text', text: JSON.stringify(rawResult, null, 2) }
-    ]
-  }
-}
-
-function handleQueryKnowledge(args) {
-  let sql = 'SELECT * FROM nodes WHERE 1=1'
-  const params = []
-
-  if (args.type) {
-    sql += ' AND type = ?'
-    params.push(args.type)
-  }
-
-  if (args.project) {
-    sql += ' AND project_id = ?'
-    params.push(args.project)
-  }
-
-  const rows = dbAll(sql, params)
-
-  // Filter by tags if provided
-  if (args.tags && args.tags.length > 0) {
-    return rows.filter(row => {
-      if (!row.tags) return false
-      const nodeTags = JSON.parse(row.tags)
-      return args.tags.some(tag => nodeTags.includes(tag))
+// ── HTTP GET helper ──
+function getFromBackend(path) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(path, BACKEND_URL)
+    const req = http.request({
+      hostname: url.hostname,
+      port: url.port,
+      path: url.pathname + url.search,
+      method: 'GET'
+    }, (res) => {
+      let body = ''
+      res.on('data', chunk => { body += chunk })
+      res.on('end', () => {
+        try { resolve(JSON.parse(body)) }
+        catch (e) { resolve({ error: body }) }
+      })
     })
+    req.on('error', (e) => reject(new Error(`Backend unreachable: ${e.message}`)))
+    req.end()
+  })
+}
+
+// ── Proxy tool calls to HTTP backend's /api/mcp endpoint ──
+async function handleToolsCall(params) {
+  const { name, arguments: args } = params
+  process.stderr.write(`[mnemosyne-mcp] Tool call: ${name}\n`)
+
+  try {
+    // For query_knowledge, get_skill, record_learning — use /api/mcp tools/call
+    // For recommend_for_project — use GET /api/recommend/:projectId
+    // For search_knowledge — use GET /api/nodes with content LIKE search
+
+    if (name === 'recommend_for_project') {
+      const limit = args.limit || 5
+      const result = await getFromBackend(`/api/recommend/${encodeURIComponent(args.projectId)}?limit=${limit}`)
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+      }
+    }
+
+    if (name === 'search_knowledge') {
+      // Use GET /api/nodes with type filter, then filter by query client-side
+      let url = '/api/nodes?'
+      if (args.type) url += `type=${encodeURIComponent(args.type)}&`
+      const allNodes = await getFromBackend(url)
+      const query = (args.query || '').toLowerCase()
+      const filtered = (allNodes.nodes || allNodes || []).filter(n =>
+        n.content && n.content.toLowerCase().includes(query)
+      )
+      return {
+        content: [{ type: 'text', text: JSON.stringify(filtered, null, 2) }]
+      }
+    }
+
+    // All other tools: proxy via /api/mcp with method: 'tools/call'
+    const result = await postToBackend('/api/mcp', {
+      method: 'tools/call',
+      params: { name, arguments: args }
+    })
+
+    // Backend's /api/mcp already returns { content: [...] } format
+    if (result.content) return result
+    return {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+    }
+  } catch (error) {
+    process.stderr.write(`[mnemosyne-mcp] Tool error: ${error.message}\n`)
+    return {
+      content: [{ type: 'text', text: `Error: ${error.message}` }],
+      isError: true
+    }
   }
-
-  return rows
 }
 
-function handleGetSkill(args) {
-  const row = dbGet('SELECT * FROM nodes WHERE id = ? AND type = ?', [args.skillId, 'K'])
-  if (!row) {
-    throw new Error(`Skill not found: ${args.skillId}`)
-  }
-  return row
-}
-
-function handleRecordLearning(args) {
-  const id = generateId()
-  const tags = serializeTags(args.tags || [])
-  const now = new Date().toISOString()
-
-  dbRun(
-    `INSERT INTO nodes (id, content, type, tags, project_id, source_platform, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, args.content, args.type, tags, args.project || 'mcp-input', 'mcp-agent', now, now]
-  )
-  saveDb()
-
-  return { nodeId: id, success: true }
-}
-
-function handleRecommendForProject(args) {
-  const limit = args.limit || 5
-
-  // Get all K/W nodes from other projects
-  const sql = `
-    SELECT * FROM nodes
-    WHERE type IN ('K', 'W')
-      AND (project_id IS NULL OR project_id != ?)
-    LIMIT ?
-  `
-
-  return dbAll(sql, [args.projectId, limit])
-}
-
-function handleSearchKnowledge(args) {
-  let sql = `SELECT * FROM nodes WHERE content LIKE ?`
-  const params = [`%${args.query}%`]
-
-  if (args.type) {
-    sql += ' AND type = ?'
-    params.push(args.type)
-  }
-
-  return dbAll(sql, params)
-}
-
-// Handle resources/list request
 function handleResourcesList() {
   return {
     resources: [
@@ -301,168 +229,119 @@ function handleResourcesList() {
   }
 }
 
-// Handle resources/read request
-function handleResourcesRead(params) {
+async function handleResourcesRead(params) {
   const { uri } = params
+  process.stderr.write(`[mnemosyne-mcp] Resource read: ${uri}\n`)
 
-  if (uri === 'mnemosyne://knowledge') {
-    const rows = dbAll('SELECT * FROM nodes WHERE type = ?', ['K'])
+  try {
+    let data
+    if (uri === 'mnemosyne://knowledge') {
+      data = await getFromBackend('/api/nodes?type=K')
+    } else if (uri === 'mnemosyne://wisdom') {
+      data = await getFromBackend('/api/nodes?type=W')
+    } else if (uri === 'mnemosyne://graph') {
+      data = await getFromBackend('/api/stats')
+    } else {
+      throw new Error(`Unknown resource: ${uri}`)
+    }
     return {
-      contents: [
-        {
-          uri: uri,
-          mimeType: 'application/json',
-          text: JSON.stringify(rows, null, 2)
-        }
-      ]
+      contents: [{
+        uri: uri,
+        mimeType: 'application/json',
+        text: JSON.stringify(data, null, 2)
+      }]
     }
+  } catch (error) {
+    throw new Error(`Resource read failed: ${error.message}`)
   }
-
-  if (uri === 'mnemosyne://wisdom') {
-    const rows = dbAll('SELECT * FROM nodes WHERE type = ?', ['W'])
-    return {
-      contents: [
-        {
-          uri: uri,
-          mimeType: 'application/json',
-          text: JSON.stringify(rows, null, 2)
-        }
-      ]
-    }
-  }
-
-  if (uri === 'mnemosyne://graph') {
-    const stats = {
-      totalNodes: dbGet('SELECT COUNT(*) as count FROM nodes')?.count || 0,
-      byType: {
-        D: dbGet('SELECT COUNT(*) as count FROM nodes WHERE type = ?', ['D'])?.count || 0,
-        I: dbGet('SELECT COUNT(*) as count FROM nodes WHERE type = ?', ['I'])?.count || 0,
-        K: dbGet('SELECT COUNT(*) as count FROM nodes WHERE type = ?', ['K'])?.count || 0,
-        W: dbGet('SELECT COUNT(*) as count FROM nodes WHERE type = ?', ['W'])?.count || 0
-      },
-      projects: []
-    }
-
-    const projects = dbAll('SELECT DISTINCT project_id FROM nodes WHERE project_id IS NOT NULL')
-    stats.projects = projects.map(p => p.project_id)
-
-    return {
-      contents: [
-        {
-          uri: uri,
-          mimeType: 'application/json',
-          text: JSON.stringify(stats, null, 2)
-        }
-      ]
-    }
-  }
-
-  throw new Error(`Unknown resource: ${uri}`)
 }
 
-// Main message handler
+// ── Main JSON-RPC message handler ──
 async function handleMessage(message) {
   try {
-    const { jsonrpc, method, params, id } = message
+    const { method, params, id } = message
 
-    // Handle notifications (no id) - don't send response
-    if (!id) {
+    // Notifications (no id) — don't respond
+    if (id === undefined || id === null) {
       if (method === 'notifications/initialized') {
-        return null
+        process.stderr.write('[mnemosyne-mcp] Client initialized notification received\n')
       }
       return null
     }
 
-    // Handle requests with id - send response
+    process.stderr.write(`[mnemosyne-mcp] Request: ${method} (id=${id})\n`)
+
     let result = null
 
-    if (method === 'initialize') {
-      result = handleInitialize()
-    } else if (method === 'tools/list') {
-      result = handleToolsList()
-    } else if (method === 'tools/call') {
-      result = handleToolsCall(params)
-    } else if (method === 'resources/list') {
-      result = handleResourcesList()
-    } else if (method === 'resources/read') {
-      result = handleResourcesRead(params)
-    } else {
-      return {
-        jsonrpc: '2.0',
-        id: id,
-        error: {
-          code: -32601,
-          message: `Unknown method: ${method}`
+    switch (method) {
+      case 'initialize':
+        result = handleInitialize()
+        break
+      case 'tools/list':
+        result = handleToolsList()
+        break
+      case 'tools/call':
+        result = await handleToolsCall(params)
+        break
+      case 'resources/list':
+        result = handleResourcesList()
+        break
+      case 'resources/read':
+        result = await handleResourcesRead(params)
+        break
+      default:
+        process.stderr.write(`[mnemosyne-mcp] Unknown method: ${method}\n`)
+        return {
+          jsonrpc: '2.0',
+          id: id,
+          error: { code: -32601, message: `Unknown method: ${method}` }
         }
-      }
     }
 
-    return {
-      jsonrpc: '2.0',
-      id: id,
-      result: result
-    }
+    const response = { jsonrpc: '2.0', id: id, result: result }
+    process.stderr.write(`[mnemosyne-mcp] Sending response for ${method} (id=${id})\n`)
+    return response
   } catch (error) {
-    process.stderr.write(`Error handling message: ${error.message}\n`)
+    process.stderr.write(`[mnemosyne-mcp] Error: ${error.message}\n`)
     return {
       jsonrpc: '2.0',
       id: message.id,
-      error: {
-        code: -32603,
-        message: error.message
-      }
+      error: { code: -32603, message: error.message }
     }
   }
 }
 
-// Initialize and start server
-async function main() {
-  // Set up readline FIRST so we can respond to initialize before DB is ready
-  const messageQueue = []
-  let dbReady = false
+// ── Start stdio transport ──
+// Set up readline IMMEDIATELY — no async init needed since we proxy to HTTP backend
+process.stderr.write('[mnemosyne-mcp] Setting up readline on stdin...\n')
 
-  const rl = readline.createInterface({
-    input: process.stdin,
-    terminal: false
-  })
-
-  rl.on('line', (line) => {
-    try {
-      const message = JSON.parse(line)
-      if (!dbReady && message.method !== 'initialize' && message.method !== 'notifications/initialized') {
-        // Queue messages that need DB until it's ready
-        messageQueue.push(message)
-        return
-      }
-      handleMessage(message).then(response => {
-        if (response) {
-          process.stdout.write(JSON.stringify(response) + '\n')
-        }
-      })
-    } catch (e) {
-      // Silently ignore parse errors as per MCP spec
-    }
-  })
-
-  rl.on('close', () => {
-    process.exit(0)
-  })
-
-  // Now initialize DB
-  await initDb()
-  dbReady = true
-
-  // Process any queued messages
-  for (const msg of messageQueue) {
-    const response = await handleMessage(msg)
-    if (response) {
-      process.stdout.write(JSON.stringify(response) + '\n')
-    }
-  }
-  messageQueue.length = 0
-}
-
-main().catch(err => {
-  process.stderr.write(`Fatal error: ${err.message}\n`)
-  process.exit(1)
+const rl = createInterface({
+  input: process.stdin,
+  terminal: false
 })
+
+rl.on('line', (line) => {
+  if (!line.trim()) return
+  process.stderr.write(`[mnemosyne-mcp] Received line: ${line.slice(0, 120)}...\n`)
+  try {
+    const message = JSON.parse(line)
+    handleMessage(message).then(response => {
+      if (response) {
+        const out = JSON.stringify(response) + '\n'
+        process.stderr.write(`[mnemosyne-mcp] Writing response (${out.length} bytes)\n`)
+        process.stdout.write(out)
+      }
+    }).catch(err => {
+      process.stderr.write(`[mnemosyne-mcp] Async error: ${err.message}\n`)
+    })
+  } catch (e) {
+    process.stderr.write(`[mnemosyne-mcp] JSON parse error: ${e.message}\n`)
+  }
+})
+
+rl.on('close', () => {
+  process.stderr.write('[mnemosyne-mcp] stdin closed, exiting\n')
+  process.exit(0)
+})
+
+process.stderr.write('[mnemosyne-mcp] Ready — waiting for JSON-RPC messages on stdin\n')
