@@ -11,7 +11,9 @@ let db = null
 
 // Initialize database connection
 async function initDb() {
-  const SQL = await initSqlJs()
+  const SQL = await initSqlJs({
+    locateFile: file => join(__dirname, 'node_modules', 'sql.js', 'dist', file)
+  })
   try {
     const fileBuffer = fs.readFileSync(DB_PATH)
     db = new SQL.Database(fileBuffer)
@@ -169,7 +171,7 @@ function handleToolsList() {
   }
 }
 
-// Handle tools/call request — wraps result in MCP content format
+// Handle tools/call request \u2014 wraps result in MCP content format
 function handleToolsCall(params) {
   const { name, arguments: args } = params
 
@@ -415,7 +417,9 @@ async function handleMessage(message) {
 
 // Initialize and start server
 async function main() {
-  await initDb()
+  // Set up readline FIRST so we can respond to initialize before DB is ready
+  const messageQueue = []
+  let dbReady = false
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -425,6 +429,11 @@ async function main() {
   rl.on('line', (line) => {
     try {
       const message = JSON.parse(line)
+      if (!dbReady && message.method !== 'initialize' && message.method !== 'notifications/initialized') {
+        // Queue messages that need DB until it's ready
+        messageQueue.push(message)
+        return
+      }
       handleMessage(message).then(response => {
         if (response) {
           process.stdout.write(JSON.stringify(response) + '\n')
@@ -438,6 +447,19 @@ async function main() {
   rl.on('close', () => {
     process.exit(0)
   })
+
+  // Now initialize DB
+  await initDb()
+  dbReady = true
+
+  // Process any queued messages
+  for (const msg of messageQueue) {
+    const response = await handleMessage(msg)
+    if (response) {
+      process.stdout.write(JSON.stringify(response) + '\n')
+    }
+  }
+  messageQueue.length = 0
 }
 
 main().catch(err => {
