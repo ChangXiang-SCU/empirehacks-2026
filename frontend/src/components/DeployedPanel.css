@@ -1,0 +1,66 @@
+.deployed-panel {
+  border-top: 1px solid rgba(255,255,255,0.1);
+  padding-top: 8px;
+}
+.deployed-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 0; user-select: none;
+}
+.deployed-title {
+  font-size: 0.85rem; font-weight: 600; color: #ccc;
+}
+.expand-icon { color: #888; font-size: 0.8rem; }
+.deployed-list { margin-top: 4px; }
+.deployed-item {
+  background: rgba(255,255,255,0.05);
+  border-radius: 6px; padding: 8px;
+  margin-bottom: 6px;
+}
+.deployed-item-header {
+  display: flex; align-items: center; gap: 6px;
+}
+.deployed-icon { font-size: 0.9rem; }
+.deployed-name {
+  font-size: 0.8rem; color: #eee;
+  overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; flex: 1;
+}
+.deployed-type-badge {
+  font-size: 0.65rem; padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(102,126,234,0.2); color: #667eea;
+  text-transform: uppercase; font-weight: 600;
+}
+.deployed-item-meta {
+  display: flex; gap: 8px; margin-top: 3px;
+  color: #888; font-size: 0.7rem;
+}
+.deployed-item-actions {
+  display: flex; gap: 4px; margin-top: 5px;
+}
+.action-small {
+  font-size: 0.7rem; padding: 2px 8px;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 3px; background: rgba(255,255,255,0.05);
+  color: #bbb; cursor: pointer;
+}
+.action-small:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.action-small.danger { color: #e57373; border-color: rgba(229,115,115,0.3); }
+.action-small.danger:hover { background: rgba(229,57,53,0.15); color: #ef5350; }
+
+.back-btn {
+  background: none; border: none; color: #667eea;
+  cursor: pointer; font-size: 0.8rem; padding: 0;
+}
+.back-btn:hover { text-decoration: underline; }
+.content-preview-full {
+  font-size: 0.75rem; color: #ccc;
+  background: rgba(0,0,0,0.2); padding: 8px;
+  border-radius: 4px; max-height: 300px;
+  overflow-y: auto; white-space: pre-wrap;
+  word-break: break-word;
+}
+.deployed-content-view { margin: 8px 0; }
+.deployed-actions-bar {
+  display: flex; gap: 6px; margin-top: 6px;
+}

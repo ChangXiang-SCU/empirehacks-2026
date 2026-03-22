@@ -4,6 +4,7 @@ import { useGraphStore } from '../stores/graphStore'
 import { getColorByType, getLabelByType } from '../utils/dikwColors'
 import './MindPalace.css'
 
+const API_BASE = 'http://localhost:3001'
 const TYPE_ICONS = { D: '📊', I: '📋', K: '💡', W: '🔮' }
 const NODE_WIDTH = 180
 const NODE_HEIGHT_EST = 90
@@ -17,6 +18,7 @@ export default function MindPalace() {
   const panStartRef = useRef({ x: 0, y: 0, tx: 0, ty: 0 })
   const dragRef = useRef(null)
   const [expandedNodes, setExpandedNodes] = useState(new Set())
+  const [exportStatus, setExportStatus] = useState({}) // nodeId -> status message
   // Track node count to only re-layout when actual data changes
   const prevNodeCountRef = useRef(0)
 
@@ -35,42 +37,28 @@ export default function MindPalace() {
   const selectedNodeId = useGraphStore((state) => state.selectedNodeId)
   const selectNode = useGraphStore((state) => state.selectNode)
 
-  // Layout engine: positions nodes in DIKW columns (left→right)
   const computeLayout = useCallback((nodeList, connList) => {
     if (nodeList.length === 0) { setPositions({}); return }
-
     const cWidth = containerRef.current?.clientWidth || 1200
     const cHeight = containerRef.current?.clientHeight || 800
     const layoutW = Math.max(cWidth, 1600)
     const layoutH = Math.max(cHeight, 1200)
-
     const simNodes = nodeList.map((n) => ({ ...n }))
     const links = connList.map((c) => ({
-      source: c.fromNodeId,
-      target: c.toNodeId,
+      source: c.fromNodeId, target: c.toNodeId,
     }))
-
     const simulation = d3
       .forceSimulation(simNodes)
-      .force(
-        'link',
-        d3.forceLink(links).id((d) => d.id).distance(250).strength(0.12)
-      )
+      .force('link', d3.forceLink(links).id((d) => d.id).distance(250).strength(0.12))
       .force('charge', d3.forceManyBody().strength(-800))
       .force('collision', d3.forceCollide().radius(100))
       .force('x', d3.forceX((d) => layoutW * (DIKW_COLUMN[d.type] || 0.5)).strength(0.7))
       .force('y', d3.forceY(layoutH / 2).strength(0.03))
       .stop()
-
     for (let i = 0; i < 300; i++) simulation.tick()
-
     const pos = {}
-    simNodes.forEach((n) => {
-      pos[n.id] = { x: n.x, y: n.y }
-    })
+    simNodes.forEach((n) => { pos[n.id] = { x: n.x, y: n.y } })
     setPositions(pos)
-
-    // Auto-fit: compute bounding box and zoom/pan to fit all nodes
     const xs = simNodes.map((n) => n.x)
     const ys = simNodes.map((n) => n.y)
     const minX = Math.min(...xs) - 40
@@ -88,7 +76,6 @@ export default function MindPalace() {
   }, [])
 
   // Only re-layout when the actual number of visible nodes changes
-  // (not on every store update like selectedNodeId change)
   useEffect(() => {
     if (nodes.length !== prevNodeCountRef.current) {
       prevNodeCountRef.current = nodes.length
@@ -101,10 +88,8 @@ export default function MindPalace() {
     if (nodes.length > 0 && Object.keys(positions).length === 0) {
       computeLayout(nodes, connections)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes.length])
 
-  // Wheel zoom (needs non-passive listener for preventDefault)
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -127,23 +112,19 @@ export default function MindPalace() {
     return () => el.removeEventListener('wheel', handler)
   }, [])
 
-  // Pan start
   const handleMouseDown = useCallback(
     (e) => {
       if (e.target.closest('.mind-node')) return
       isPanningRef.current = true
       panStartRef.current = {
-        x: e.clientX,
-        y: e.clientY,
-        tx: transform.x,
-        ty: transform.y,
+        x: e.clientX, y: e.clientY,
+        tx: transform.x, ty: transform.y,
       }
       if (containerRef.current) containerRef.current.style.cursor = 'grabbing'
     },
     [transform]
   )
 
-  // Mouse move: drag node or pan
   const handleMouseMove = useCallback(
     (e) => {
       if (dragRef.current) {
@@ -169,14 +150,12 @@ export default function MindPalace() {
     [transform.k]
   )
 
-  // Mouse up
   const handleMouseUp = useCallback(() => {
     isPanningRef.current = false
     dragRef.current = null
     if (containerRef.current) containerRef.current.style.cursor = 'grab'
   }, [])
 
-  // Node drag start
   const handleNodeMouseDown = useCallback(
     (e, nodeId) => {
       e.stopPropagation()
@@ -191,7 +170,6 @@ export default function MindPalace() {
     [positions, selectNode]
   )
 
-  // Node double-click to toggle expand/collapse
   const handleNodeDoubleClick = useCallback(
     (e, nodeId) => {
       e.stopPropagation()
@@ -200,27 +178,22 @@ export default function MindPalace() {
     [toggleExpand]
   )
 
-  // Render bezier connection path
   const renderConnection = (conn) => {
     const fromPos = positions[conn.fromNodeId]
     const toPos = positions[conn.toNodeId]
     if (!fromPos || !toPos) return null
-
     const fromNode = nodes.find((n) => n.id === conn.fromNodeId)
     const toNode = nodes.find((n) => n.id === conn.toNodeId)
-
     const fx = fromPos.x + NODE_WIDTH
     const fy = fromPos.y + NODE_HEIGHT_EST / 2
     const tx = toPos.x
     const ty = toPos.y + NODE_HEIGHT_EST / 2
     const midX = (fx + tx) / 2
-
     let color = '#444'
     if (fromNode?.type === 'K' || toNode?.type === 'K') color = '#f57c00'
     if (fromNode?.type === 'W' || toNode?.type === 'W') color = '#e53935'
     const isCross = fromNode?.projectId !== toNode?.projectId
     if (isCross) color = '#667eea'
-
     return (
       <path
         key={conn.id}
@@ -234,12 +207,35 @@ export default function MindPalace() {
     )
   }
 
-  // Get project for a node
+
+  const handleExport = async (node, type) => {
+    const nodeId = node.id
+    setExportStatus(prev => ({ ...prev, [nodeId]: 'exporting...' }))
+    try {
+      let url, body
+      if (type === 'skill') {
+        url = API_BASE + '/api/export/skill/' + nodeId + '?deploy=true'
+        body = { method: 'POST' }
+      } else {
+        url = API_BASE + '/api/export/claude/' + node.projectId + '?deploy=true'
+        body = { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+      }
+      const res = await fetch(url, body)
+      if (!res.ok) throw new Error('Failed: ' + res.status)
+      const data = await res.json()
+      const shortPath = data.path.replace(/^.*\.claude/, '~/.claude')
+      setExportStatus(prev => ({ ...prev, [nodeId]: 'Deployed: ' + shortPath }))
+      setTimeout(() => setExportStatus(prev => { const n = { ...prev }; delete n[nodeId]; return n }), 5000)
+    } catch (e) {
+      setExportStatus(prev => ({ ...prev, [nodeId]: 'Failed: ' + e.message }))
+      setTimeout(() => setExportStatus(prev => { const n = { ...prev }; delete n[nodeId]; return n }), 4000)
+    }
+  }
+
   const getProject = (node) => {
     return (
       projects.find((p) => p.id === node.projectId) || {
-        name: 'Unknown',
-        color: '#666',
+        name: 'Unknown', color: '#666',
       }
     )
   }
@@ -253,15 +249,12 @@ export default function MindPalace() {
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
     >
-      {/* Dot grid background */}
       <div
         className="grid-bg"
         style={{
           transform: `translate(${transform.x % 30}px, ${transform.y % 30}px)`,
         }}
       />
-
-      {/* Pannable / zoomable canvas */}
       <div
         className="canvas"
         style={{
@@ -269,12 +262,10 @@ export default function MindPalace() {
           transformOrigin: '0 0',
         }}
       >
-        {/* SVG connection lines */}
         <svg className="connections-svg">
           {connections.map((c) => renderConnection(c))}
         </svg>
 
-        {/* Node cards */}
         {nodes.map((node) => {
           const pos = positions[node.id]
           if (!pos) return null
@@ -326,6 +317,23 @@ export default function MindPalace() {
                           {tag}
                         </span>
                       ))}
+
+                  {/* Export buttons for K and W nodes */}
+                  {(node.type === 'K' || node.type === 'W') && (
+                    <div className="mind-node-export">
+                      <button
+                        className="export-btn-mind deploy"
+                        onClick={(e) => { e.stopPropagation(); handleExport(node, node.type === 'K' ? 'skill' : 'claude') }}
+                      >
+                        {node.type === 'K' ? 'Deploy Skill' : 'Deploy Rules'}
+                      </button>
+                      {exportStatus[node.id] && (
+                        <span className={'export-status-mind ' + (exportStatus[node.id].includes('Failed') ? 'error' : 'ok')}>
+                          {exportStatus[node.id]}
+                        </span>
+                      )}
+                    </div>
+                  )}
                     </div>
                   )}
                 </div>
@@ -335,7 +343,6 @@ export default function MindPalace() {
         })}
       </div>
 
-      {/* Zoom controls */}
       <div className="zoom-controls">
         <button className="zoom-btn auto-layout-btn" onClick={() => computeLayout(nodes, connections)}>
           ⚡ Auto Layout

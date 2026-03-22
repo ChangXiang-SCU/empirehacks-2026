@@ -8,13 +8,13 @@
     "db:init": "node scripts/init-db.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "ws": "^8.15.0",
-    "sql.js": "^1.9.0",
-    "multer": "^1.4.5-lts.1",
     "chokidar": "^3.6.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1",
+    "sql.js": "^1.9.0",
     "uuid": "^9.0.1",
-    "dotenv": "^16.3.1"
+    "ws": "^8.15.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

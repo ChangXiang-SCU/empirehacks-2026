@@ -13,6 +13,7 @@ export default function Sidebar() {
   const toggleProject = useGraphStore((state) => state.toggleActiveProject)
   const toggleDIKW = useGraphStore((state) => state.toggleActiveDIKW)
   const setShowImportWizard = useGraphStore((state) => state.setShowImportWizard)
+  const setShowInbox = useGraphStore((state) => state.setShowInbox)
 
   const dikwTypes = [
     { type: 'D', label: 'Data', color: '#3949ab' },
@@ -40,10 +41,7 @@ export default function Sidebar() {
                   checked={activeProjects.has(project.id)}
                   onChange={() => toggleProject(project.id)}
                 />
-                <span
-                  className="project-color"
-                  style={{ backgroundColor: project.color }}
-                ></span>
+                <span className="project-color" style={{ backgroundColor: project.color }}></span>
                 <span className="project-name">{project.name}</span>
               </label>
             ))
@@ -61,10 +59,7 @@ export default function Sidebar() {
                 checked={activeDIKW.has(item.type)}
                 onChange={() => toggleDIKW(item.type)}
               />
-              <span
-                className="dikw-dot"
-                style={{ backgroundColor: item.color }}
-              ></span>
+              <span className="dikw-dot" style={{ backgroundColor: item.color }}></span>
               <span>{item.label}</span>
             </label>
           ))}
@@ -91,11 +86,11 @@ export default function Sidebar() {
       </div>
 
       <div className="sidebar-actions">
-        <button
-          className="action-btn primary"
-          onClick={() => setShowImportWizard(true)}
-        >
+        <button className="action-btn primary" onClick={() => setShowImportWizard(true)}>
           + Import
+        </button>
+        <button className="action-btn secondary" onClick={() => setShowInbox(true)}>
+          Inbox
         </button>
       </div>
 

@@ -9,17 +9,17 @@
     "lint": "eslint src"
   },
   "dependencies": {
+    "axios": "^1.6.8",
+    "d3": "^7.8.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "d3": "^7.8.5",
-    "zustand": "^4.4.1",
-    "axios": "^1.6.8"
+    "zustand": "^4.4.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.2.1",
-    "vite": "^5.1.0",
-    "tailwindcss": "^3.4.1",
+    "@vitejs/plugin-react": "^4.7.0",
+    "autoprefixer": "^10.4.17",
     "postcss": "^8.4.33",
-    "autoprefixer": "^10.4.17"
+    "tailwindcss": "^3.4.1",
+    "vite": "^5.4.21"
   }
 }

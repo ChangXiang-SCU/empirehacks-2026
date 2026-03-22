@@ -24,32 +24,22 @@
 /* ===== Canvas (pan/zoom layer) ===== */
 .canvas {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
   z-index: 1;
 }
 
 /* ===== SVG connections ===== */
 .connections-svg {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
   pointer-events: none;
   z-index: 1;
   overflow: visible;
 }
-
-.connections-svg path {
-  transition: opacity 0.2s;
-}
-
-.connections-svg path.cross-project {
-  stroke-dasharray: 8, 4;
-}
+.connections-svg path { transition: opacity 0.2s; }
+.connections-svg path.cross-project { stroke-dasharray: 8, 4; }
 
 /* ===== Node cards ===== */
 .mind-node {
@@ -60,27 +50,16 @@
   transition: box-shadow 0.2s;
   user-select: none;
 }
-
-.mind-node.collapsed {
-  min-width: 160px;
-  max-width: 200px;
-}
-
-.mind-node.expanded {
-  min-width: 200px;
-  max-width: 280px;
-}
-
+.mind-node.collapsed { min-width: 160px; max-width: 200px; }
+.mind-node.expanded { min-width: 200px; max-width: 280px; }
 .mind-node:hover {
   z-index: 20 !important;
   box-shadow: 0 0 20px rgba(102, 126, 234, 0.3);
 }
-
 .mind-node.selected {
   z-index: 25 !important;
   box-shadow: 0 0 30px rgba(102, 126, 234, 0.5);
 }
-
 .mind-node.shared {
   outline: 2px dashed rgba(255, 255, 255, 0.3);
   outline-offset: 3px;
@@ -98,11 +77,7 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
-
-.mind-node-type {
-  white-space: nowrap;
-}
-
+.mind-node-type { white-space: nowrap; }
 .mind-node-toggle {
   font-size: 10px;
   opacity: 0.5;
@@ -118,7 +93,6 @@
   border: 1px solid #1e1e2e;
   border-top: none;
 }
-
 .mind-node-preview {
   font-size: 11px;
   color: #aaa;
@@ -129,7 +103,6 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-
 .mind-node-collapsed-body .mind-node-project {
   display: inline-block;
   margin-top: 5px;
@@ -149,7 +122,6 @@
   border: 1px solid #1e1e2e;
   border-top: none;
 }
-
 .mind-node-project-expanded {
   display: inline-block;
   font-size: 9px;
@@ -158,7 +130,6 @@
   white-space: nowrap;
   margin-bottom: 6px;
 }
-
 /* Full content — NO line clamp */
 .mind-node-content-full {
   color: #ccc;
@@ -174,7 +145,6 @@
   gap: 3px;
   margin-top: 6px;
 }
-
 .mind-node-tag {
   font-size: 9px;
   padding: 1px 6px;
@@ -191,13 +161,8 @@
   color: #8c9eff;
 }
 .d-node .mind-node-collapsed-body,
-.d-node .mind-node-body {
-  border-color: #283593;
-}
-.d-project {
-  background: rgba(92, 107, 192, 0.15);
-  color: #8c9eff;
-}
+.d-node .mind-node-body { border-color: #283593; }
+.d-project { background: rgba(92, 107, 192, 0.15); color: #8c9eff; }
 
 /* Information — teal */
 .i-node .mind-node-header {
@@ -205,13 +170,8 @@
   color: #80cbc4;
 }
 .i-node .mind-node-collapsed-body,
-.i-node .mind-node-body {
-  border-color: #00695c;
-}
-.i-project {
-  background: rgba(0, 137, 123, 0.15);
-  color: #80cbc4;
-}
+.i-node .mind-node-body { border-color: #00695c; }
+.i-project { background: rgba(0, 137, 123, 0.15); color: #80cbc4; }
 
 /* Knowledge — orange */
 .k-node .mind-node-header {
@@ -219,13 +179,8 @@
   color: #ffe0b2;
 }
 .k-node .mind-node-collapsed-body,
-.k-node .mind-node-body {
-  border-color: #e65100;
-}
-.k-project {
-  background: rgba(245, 124, 0, 0.15);
-  color: #ffb74d;
-}
+.k-node .mind-node-body { border-color: #e65100; }
+.k-project { background: rgba(245, 124, 0, 0.15); color: #ffb74d; }
 
 /* Wisdom — red */
 .w-node .mind-node-header {
@@ -233,13 +188,8 @@
   color: #ffcdd2;
 }
 .w-node .mind-node-collapsed-body,
-.w-node .mind-node-body {
-  border-color: #b71c1c;
-}
-.w-project {
-  background: rgba(229, 57, 53, 0.15);
-  color: #ef9a9a;
-}
+.w-node .mind-node-body { border-color: #b71c1c; }
+.w-project { background: rgba(229, 57, 53, 0.15); color: #ef9a9a; }
 
 /* ===== Zoom controls ===== */
 .zoom-controls {
@@ -251,10 +201,8 @@
   gap: 4px;
   z-index: 50;
 }
-
 .zoom-btn {
-  width: 32px;
-  height: 32px;
+  width: 32px; height: 32px;
   border-radius: 8px;
   border: 1px solid #1e1e2e;
   background: #111119;
@@ -265,12 +213,7 @@
   align-items: center;
   justify-content: center;
 }
-
-.zoom-btn:hover {
-  background: #1a1a2e;
-  color: white;
-}
-
+.zoom-btn:hover { background: #1a1a2e; color: white; }
 .zoom-level {
   padding: 0 8px;
   font-size: 11px;
@@ -278,13 +221,7 @@
   display: flex;
   align-items: center;
 }
-
-.reset-btn {
-  font-size: 11px;
-  width: auto;
-  padding: 0 8px;
-}
-
+.reset-btn { font-size: 11px; width: auto; padding: 0 8px; }
 .auto-layout-btn {
   width: auto;
   padding: 0 12px;
@@ -294,8 +231,61 @@
   color: white;
   border-color: transparent;
 }
-
 .auto-layout-btn:hover {
   background: linear-gradient(135deg, #5a6fd6, #6a4198);
   color: white;
+}
+
+
+/* Export buttons in expanded nodes */
+.mind-node-export {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.export-btn-mind {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.export-btn-mind.deploy {
+  background: rgba(0, 137, 123, 0.25);
+  color: #4db6ac;
+  border: 1px solid rgba(0, 137, 123, 0.4);
+}
+
+.export-btn-mind.deploy:hover {
+  background: rgba(0, 137, 123, 0.45);
+  color: #fff;
+}
+
+.export-status-mind {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.export-status-mind.ok {
+  background: rgba(0, 137, 123, 0.15);
+  color: #4db6ac;
+}
+
+.export-status-mind.error {
+  background: rgba(229, 57, 53, 0.15);
+  color: #ef5350;
 }

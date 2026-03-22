@@ -79,3 +79,121 @@
   color: var(--text-secondary);
   font-size: 12px;
 }
+/* Export buttons */
+.export-buttons {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.export-btn {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.export-btn.deploy {
+  background-color: rgba(0, 137, 123, 0.15);
+  color: #00897b;
+  border-color: rgba(0, 137, 123, 0.3);
+}
+
+.export-btn.deploy:hover {
+  background-color: rgba(0, 137, 123, 0.3);
+}
+
+.export-btn.download {
+  background-color: rgba(30, 136, 229, 0.15);
+  color: #1e88e5;
+  border-color: rgba(30, 136, 229, 0.3);
+}
+
+.export-btn.download:hover {
+  background-color: rgba(30, 136, 229, 0.3);
+}
+
+.export-status {
+  margin-top: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.export-status.success {
+  background-color: rgba(0, 137, 123, 0.1);
+  color: #00897b;
+}
+
+.export-status.error {
+  background-color: rgba(229, 57, 53, 0.1);
+  color: #e53935;
+}
+
+
+.export-status.info {
+  background-color: rgba(33, 150, 243, 0.1);
+  color: #1976d2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.spinner {
+  width: 12px; height: 12px;
+  border: 2px solid #1976d2;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.deploy-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-top: 6px;
+  background: rgba(76, 175, 80, 0.1);
+  border-radius: 4px;
+  font-size: 0.8rem;
+  color: #2e7d32;
+}
+
+.deploy-success-icon {
+  font-weight: bold;
+  color: #4caf50;
+}
+
+.copy-path-btn {
+  background: #e8f5e9;
+  border: 1px solid #a5d6a7;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  color: #2e7d32;
+}
+.copy-path-btn:hover { background: #c8e6c9; }
+
+.dismiss-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #999;
+  font-size: 1rem;
+  padding: 0 2px;
+  margin-left: auto;
+}
+.dismiss-btn:hover { color: #666; }
+
+.export-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
