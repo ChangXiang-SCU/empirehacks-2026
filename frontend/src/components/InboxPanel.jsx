@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useGraphStore } from '../stores/graphStore'
 import './InboxPanel.css'
 
-const API_BASE = 'http://localhost:3001'
+const API_BASE = ''
 
 export default function InboxPanel() {
   const showInbox = useGraphStore((state) => state.showInbox)

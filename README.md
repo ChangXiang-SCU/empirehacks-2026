@@ -234,6 +234,20 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 
 Restart Claude Desktop — you'll see "Add from mnemosyne" in the + menu.
 
+### Remote deployment (v2)
+
+Mnemosyne can also run on a server as a **remote MCP server** that every tool shares: claude.ai (web, desktop, mobile) as a
+custom connector, Claude Code, Codex, and bots running on the same host.
+
+- Streamable HTTP MCP at `<public url>/<secret>/mcp` with tools `search_memory`, `recent_activity`, `list_projects`,
+  `get_project_context`, `get_node`, `record_learning`, `export_skill` (Chinese and English keyword search).
+- A zero-dependency collector (`collector/mnemo-collector.mjs`) uploads finished Claude Code, Cowork and Codex sessions
+  from each machine; recent sessions are distilled through the DIKW pipeline on the server.
+- Sessions are filed under the same **Claude Projects** you see in the Claude app, so you can ask for a Project's context
+  from any tool.
+
+Setup and operations: [`deploy/README.md`](deploy/README.md).
+
 ---
 
 ## 📁 Project Structure

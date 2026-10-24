@@ -1,100 +1,82 @@
 import { v4 as uuidv4 } from 'uuid'
+import { cleanMessage, makeTitle, workspaceFromCwd } from '../text.js'
 
 /**
- * Import Claude Code session JSONL files
- * Only extracts meaningful user/assistant text messages
- * Returns { sessionId, projectName, nodes[] }
+ * Import a Claude Code transcript JSONL (~/.claude/projects/<cwd>/<session>.jsonl)
+ * or a Cowork / Agent SDK audit log (local-agent-mode-sessions/.../audit.jsonl).
+ * Both use { type: 'user'|'assistant', message: { content } } events.
+ * Only user/assistant text is kept; tool calls, tool results and thinking are dropped.
+ * Returns { sessionId, projectName, title, cwd, workspace, nodes[] }
  */
-export function importClaudeCode(jsonlContent) {
+export function importClaudeCode(jsonlContent, opts = {}) {
+  const platform = opts.platform || 'claude-code'
+  const maxChars = opts.maxChars || 5000
   const nodes = []
   const now = new Date().toISOString()
-  const lines = jsonlContent.trim().split('\n')
 
   let sessionId = null
+  let cwd = null
   let firstUserMsg = null
+  let summary = null
+  let lastTs = null
+  const toIso = (v) => {
+    if (v == null || v === '') return null
+    const d = new Date(typeof v === 'number' && v < 1e12 ? v * 1000 : v)
+    return isNaN(d) ? null : d.toISOString()
+  }
 
-  for (const line of lines) {
+  for (const line of jsonlContent.split('\n')) {
     if (!line.trim()) continue
     let event
     try { event = JSON.parse(line) } catch { continue }
 
+    if (!sessionId) sessionId = event.sessionId || event.session_id || null
+    const ts = toIso(event.timestamp) || toIso(event._audit_timestamp)
+    if (ts) lastTs = ts
+    if (!cwd && event.cwd) cwd = event.cwd
+    if (event.type === 'summary' && event.summary) { summary = event.summary; continue }
+    if (event.type === 'custom-title' && event.customTitle) { summary = event.customTitle; continue }
+
     const eventType = event.type
-
-    // Extract sessionId from queue-operation if available
-    if (eventType === 'queue-operation' && event.sessionId) {
-      if (!sessionId) sessionId = event.sessionId
-      continue // Skip queue events as nodes
-    }
-
-    // Skip non-message events entirely
     if (eventType !== 'user' && eventType !== 'assistant') continue
+    if (event.isMeta || event.isSidechain || event.parent_tool_use_id) continue
+    if (event.isReplay) continue
 
-    // Extract text content from the message
     const msg = event.message
     if (!msg) continue
-
-    let textContent = ''
     const role = msg.role || eventType
 
-    if (typeof msg.content === 'string') {
-      textContent = msg.content
-    } else if (Array.isArray(msg.content)) {
-      // Extract only text blocks, skip tool_use and tool_result
-      const textParts = msg.content
-        .filter(c => c.type === 'text')
-        .map(c => c.text || '')
-        .filter(t => t.length > 0)
-      textContent = textParts.join('\n')
+    let text = ''
+    if (typeof msg.content === 'string') text = msg.content
+    else if (Array.isArray(msg.content)) {
+      text = msg.content.filter(c => c && c.type === 'text' && c.text).map(c => c.text).join('\n')
     }
+    if (role === 'user') text = cleanMessage(text)
+    else text = (text || '').trim()
+    if (!text || text.length < 4) continue
 
-    if (!textContent || textContent.length < 15) continue
+    if (role === 'user' && !firstUserMsg) firstUserMsg = text
 
-    // Skip system prompts / boilerplate
-    const SKIP_PREFIXES = [
-      '<permissions', '<app-context', '<collaboration_mode',
-      '<skills_instructions', '<environment_context',
-      '<tool_', '<system', 'You are ', '<?xml',
-      '<turn_aborted', '<environment_context', '<cwd>'
-    ]
-    if (SKIP_PREFIXES.some(p => textContent.trimStart().startsWith(p))) continue
-
-    // Remember first user message for project naming
-    if (role === 'user' && !firstUserMsg) {
-      firstUserMsg = textContent.substring(0, 80).replace(/\n/g, ' ')
-    }
-
-    // Truncate for storage
-    const content = `[${role}] ${textContent.substring(0, 5000)}`
-
-    // Dedup adjacent identical messages
     if (nodes.length > 0) {
-      const lastContent = nodes[nodes.length - 1].content?.replace(/^\[(user|assistant)\]\s*/, '')
-      if (lastContent?.substring(0, 80) === textContent.substring(0, 80)) continue
+      const last = nodes[nodes.length - 1]
+      if (last.dtype === role && last.content.slice(role.length + 3, role.length + 83) === text.slice(0, 80)) continue
     }
 
     nodes.push({
       id: `node_${uuidv4()}`,
       type: 'D',
       projectId: 'unclassified',
-      sourcePlatform: 'claude-code',
-      content,
-      tags: [role, 'claude-code'],
+      sourcePlatform: platform,
+      content: `[${role}] ${text.substring(0, maxChars)}`,
+      tags: [role, platform],
       dtype: role,
       mcpSource: null,
       sharedProjects: [],
-      createdAt: event.timestamp || now
+      createdAt: ts || lastTs || opts.fileTime || now
     })
   }
 
-  // Derive session ID and project name
-  if (!sessionId) {
-    // Try to extract from file content or generate one
-    sessionId = `cc_${Date.now()}`
-  }
-
-  const projectName = firstUserMsg
-    ? `Claude: ${firstUserMsg.substring(0, 50)}${firstUserMsg.length > 50 ? '...' : ''}`
-    : 'Claude Code Session'
-
-  return { sessionId, projectName, nodes }
+  if (!sessionId) sessionId = opts.fallbackId || `cc_${Date.now()}`
+  const title = makeTitle(summary || firstUserMsg) || (platform === 'cowork' ? 'Cowork session' : 'Claude Code session')
+  return { sessionId, projectName: title, title, cwd, workspace: workspaceFromCwd(cwd), nodes }
 }

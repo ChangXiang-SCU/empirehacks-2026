@@ -36,8 +36,10 @@ function App() {
   const connectWebSocket = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return
 
-    const wsHost = window.location.hostname || 'localhost'
-    const ws = new WebSocket(`ws://${wsHost}:3001`)
+    // Same origin as the page (vite dev proxies /ws to the backend)
+    const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const wsHost = window.location.port === '5173' ? `${window.location.hostname}:3001` : window.location.host
+    const ws = new WebSocket(`${wsProto}://${wsHost}`)
     wsRef.current = ws
 
     ws.onopen = () => {

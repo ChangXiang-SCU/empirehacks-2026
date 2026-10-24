@@ -10,3 +10,9 @@ dist/
 build/
 coverage/
 .parcel-cache/
+
+# local deploy scratch (secrets, db copies)
+deploy/_ops/
+deploy/_old_startup/
+backend/db/*.db.tmp
+deploy/private/

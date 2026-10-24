@@ -4,8 +4,10 @@ import { v4 as uuidv4 } from 'uuid'
 // Uses OpenAI API (GPT-4.1) for intelligent DIKW transforms.
 // Easy to swap to Anthropic API later by changing callLLM().
 
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
-const MODEL = 'gpt-5.4'
+// Any OpenAI-compatible endpoint works (e.g. a local llama.cpp server): set MNEMO_LLM_BASE_URL / MNEMO_LLM_MODEL.
+const OPENAI_URL = (process.env.MNEMO_LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '') + '/chat/completions'
+const MODEL = process.env.MNEMO_LLM_MODEL || 'gpt-5.4'
+const MAX_OUT = Number(process.env.MNEMO_LLM_MAX_TOKENS || 4000)
 
 // ── Transform lock to prevent concurrent transforms on same project ──
 const _locks = new Map()
@@ -20,7 +22,7 @@ async function withLock(key, fn) {
 
 // ── LLM API helper ──
 export async function callLLM(systemPrompt, userPrompt) {
-  const apiKey = process.env.OPENAI_API_KEY
+  const apiKey = process.env.MNEMO_LLM_API_KEY || process.env.OPENAI_API_KEY
   if (!apiKey) {
     console.error('OPENAI_API_KEY not set - using fallback')
     return null
@@ -38,7 +40,7 @@ export async function callLLM(systemPrompt, userPrompt) {
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
-        max_completion_tokens: 1024,
+        max_completion_tokens: MAX_OUT,
         temperature: 0.3
       })
     })
