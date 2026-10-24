@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import './DeployedPanel.css'
 
-const API_BASE = 'http://localhost:3001'
+const API_BASE = ''
 
 export default function DeployedPanel() {
   const [deployments, setDeployments] = useState([])

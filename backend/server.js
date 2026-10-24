@@ -10,6 +10,9 @@ import { v4 as uuidv4 } from 'uuid'
 import initSqlJs from 'sql.js'
 import fs from 'fs'
 import crypto from 'crypto'
+import zlib from 'zlib'
+import { createMcpHandler } from './lib/remoteMcp.js'
+import { cleanMessage, makeTitle, workspaceFromCwd } from './lib/text.js'
 
 // Import custom modules
 import { importChatGPT } from './lib/importers/chatgpt.js'
@@ -39,11 +42,18 @@ const __dirname = dirname(__filename)
 
 const app = express()
 const server = createServer(app)
-const wss = new WebSocketServer({ server })
+const wss = new WebSocketServer({ noServer: true })
+const attachWs = (srv) => srv.on('upgrade', (req, sock, head) => wss.handleUpgrade(req, sock, head, ws => wss.emit('connection', ws, req)))
+attachWs(server)
 const upload = multer({ storage: multer.memoryStorage() })
 
-const PORT = process.env.BACKEND_PORT || 3001
-const DB_PATH = join(__dirname, 'db', 'mnemosyne.db')
+const PORT = Number(process.env.PORT || process.env.BACKEND_PORT || 3001)
+const DB_PATH = process.env.MNEMO_DB || join(__dirname, 'db', 'mnemosyne.db')
+const BIND_HOSTS = (process.env.BIND_HOSTS || '').split(',').map(s => s.trim()).filter(Boolean)
+const MNEMO_SECRET = process.env.MNEMO_SECRET || ''
+const WATCH_LOCAL = process.env.MNEMO_WATCH ? process.env.MNEMO_WATCH === '1' : !MNEMO_SECRET
+const GRAPH_D_PROJECTS = Number(process.env.MNEMO_GRAPH_D_PROJECTS || 25)
+let dataVersion = 0
 
 // \u2500\u2500 Database helpers (sql.js) \u2500\u2500
 let db = null
@@ -66,13 +76,22 @@ function dbRun(sql, params = []) {
   db.run(sql, params)
 }
 
-function saveDb() {
-  const data = db.export()
-  const buffer = Buffer.from(data)
+let _saveTimer = null
+function flushDb() {
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null }
+  const buffer = Buffer.from(db.export())
   const dir = dirname(DB_PATH)
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(DB_PATH, buffer)
+  const tmp = DB_PATH + '.tmp'
+  fs.writeFileSync(tmp, buffer)
+  fs.renameSync(tmp, DB_PATH)
 }
+// Writes are coalesced: sql.js serialises the whole DB, so save at most every 3s.
+function saveDb() {
+  dataVersion++
+  if (!_saveTimer) _saveTimer = setTimeout(() => { _saveTimer = null; try { flushDb() } catch (e) { console.error('saveDb failed:', e.message) } }, 3000)
+}
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { try { if (db) flushDb() } catch {} process.exit(0) })
 
 // \u2500\u2500 Initialize \u2500\u2500
 async function initializeDatabase() {
@@ -89,6 +108,7 @@ async function initializeDatabase() {
 
   const schema = fs.readFileSync(join(__dirname, 'db/schema.sql'), 'utf-8')
   db.exec(schema)
+  migrateDb()
 
   const row = dbGet('SELECT COUNT(*) as count FROM nodes')
   if (row && row.count === 0) {
@@ -143,9 +163,33 @@ function seedDatabase() {
   }
 }
 
-// \u2500\u2500 Helpers \u2500\u2500
+function migrateDb() {
+  const cols = new Set(dbAll('PRAGMA table_info(projects)').map(c => c.name))
+  db.run(`CREATE TABLE IF NOT EXISTS spaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, project_uuids TEXT, folders TEXT, updated_at TEXT)`)
+  for (const [c, t] of [['workspace', 'TEXT'], ['platform', 'TEXT'], ['session_path', 'TEXT'], ['file_size', 'INTEGER'], ['last_ingest', 'TEXT'], ['last_dikw', 'TEXT'], ['space_id', 'TEXT'], ['space_checked', 'TEXT']]) {
+    if (!cols.has(c)) db.run(`ALTER TABLE projects ADD COLUMN ${c} ${t}`)
+  }
+  // Repair names produced by the old importers ("Codex: <recommended_plugins> ...")
+  const JUNK = /<recommended_plugins>|# Files mentioned by the user|<environment_context>|^Claude Code Session$|^(Codex|Claude): /
+  let fixed = 0
+  for (const p of dbAll('SELECT id, name FROM projects')) {
+    if (!JUNK.test(p.name || '')) continue
+    const users = dbAll(`SELECT content, source_platform FROM nodes WHERE project_id = ? AND type = 'D' AND (dtype = 'user' OR content LIKE '[user]%') ORDER BY created_at LIMIT 8`, [p.id])
+    let title = ''
+    for (const u of users) { title = makeTitle(cleanMessage((u.content || '').replace(/^\[user\]\s*/, ''))); if (title) break }
+    if (!title) title = (p.name || '').replace(/^(Codex|Claude): /, '').replace(/<recommended_plugins>.*/, '').trim() || p.id
+    const platform = dbGet(`SELECT source_platform FROM nodes WHERE project_id = ? AND type = 'D' LIMIT 1`, [p.id])?.source_platform || null
+    db.run('UPDATE projects SET name = ?, platform = COALESCE(platform, ?) WHERE id = ?', [title, platform, p.id])
+    fixed++
+  }
+  if (fixed) console.log(`✓ Repaired ${fixed} project names`)
+}
+
+// ── Helpers ──
 function getGraph() {
-  const nodes = dbAll('SELECT * FROM nodes').map(row => ({
+  const recentD = dbAll(`SELECT project_id FROM nodes WHERE type = 'D' GROUP BY project_id ORDER BY MAX(created_at) DESC LIMIT ?`, [GRAPH_D_PROJECTS]).map(r => r.project_id)
+  const dFilter = recentD.length ? `type != 'D' OR project_id IN (${recentD.map(() => '?').join(',')})` : `type != 'D'`
+  const nodes = dbAll(`SELECT * FROM nodes WHERE ${dFilter}`, recentD).map(row => ({
     id: row.id, type: row.type, projectId: row.project_id,
     sourcePlatform: row.source_platform, content: row.content,
     tags: JSON.parse(row.tags || '[]'), dtype: row.dtype,
@@ -206,6 +250,64 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE')
   next()
 })
+
+// ── Remote access: /<MNEMO_SECRET>/mcp and /<MNEMO_SECRET>/api/ingest ──
+// Caddy only forwards /<secret>/* to this process, so the secret path is the credential.
+const mcpStore = { dbAll, dbGet, dbRun, save: saveDb, broadcast: (m) => broadcastToClients(m), version: () => dataVersion }
+const { handler: mcpHandler } = createMcpHandler(mcpStore)
+if (MNEMO_SECRET) {
+  const base = '/' + MNEMO_SECRET
+  app.post(base + '/mcp', mcpHandler)
+  app.all(base + '/mcp', (req, res) => res.status(405).set('Allow', 'POST').json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed' }, id: null }))
+  app.post(base + '/api/ingest', express.raw({ type: '*/*', limit: '200mb' }), async (req, res) => {
+    try {
+      let buf = req.body
+      if (!Buffer.isBuffer(buf) || !buf.length) return res.status(400).json({ error: 'empty body' })
+      if (req.get('content-encoding') === 'gzip' || req.is('application/gzip')) buf = zlib.gunzipSync(buf)
+      const result = await ingestSession({
+        platform: String(req.query.platform || 'claude-code'),
+        content: buf.toString('utf-8'),
+        filePath: String(req.query.path || ''),
+        fileSize: Number(req.query.size || buf.length),
+        fileTime: req.query.mtime ? new Date(Number(req.query.mtime)).toISOString() : null,
+        dikw: req.query.dikw !== '0'
+      })
+      res.json(result)
+    } catch (e) {
+      console.error('Ingest error:', e)
+      res.status(500).json({ error: e.message })
+    }
+  })
+  // Claude desktop Projects ("spaces"): name, claude.ai project uuids, linked folders; sent by the collector
+  app.post(base + '/api/spaces', (req, res) => {
+    try {
+      const list = Array.isArray(req.body?.spaces) ? req.body.spaces : []
+      const now = new Date().toISOString()
+      for (const sp of list) {
+        if (!sp?.id || !sp?.name) continue
+        const uuids = (sp.projects || []).map(p => p.uuid || p).filter(Boolean)
+        const folders = (sp.folders || []).map(f => f.path || f).filter(Boolean)
+        dbRun(`INSERT INTO spaces (id, name, project_uuids, folders, updated_at) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET name = excluded.name, project_uuids = excluded.project_uuids, folders = excluded.folders, updated_at = excluded.updated_at`,
+          [sp.id, sp.name, JSON.stringify(uuids), JSON.stringify(folders), now])
+      }
+      // File already-known sessions whose workspace folder is one of a Project's folders
+      const byBase = new Map()
+      for (const sp of dbAll('SELECT id, folders FROM spaces')) for (const f of JSON.parse(sp.folders || '[]')) {
+        const base = normPath(f).split('/').pop(); if (base) byBase.set(base, sp.id)
+      }
+      let filed = 0
+      for (const p of dbAll('SELECT id, workspace FROM projects WHERE space_id IS NULL AND workspace IS NOT NULL')) {
+        const sid = byBase.get(String(p.workspace).toLowerCase())
+        if (sid) { dbRun('UPDATE projects SET space_id = ? WHERE id = ?', [sid, p.id]); filed++ }
+      }
+      saveDb()
+      res.json({ ok: true, spaces: dbGet('SELECT COUNT(*) AS c FROM spaces')?.c || 0, filed })
+    } catch (e) { res.status(500).json({ error: e.message }) }
+  })
+  app.get(base + '/api/health', (req, res) => res.json({ ok: true, nodes: dbGet('SELECT COUNT(*) AS c FROM nodes')?.c || 0, version: dataVersion }))
+  app.all(base + '/*', (req, res) => res.status(404).json({ error: 'not found' }))
+}
 
 // \u2500\u2500 GET /api/graph \u2500\u2500
 app.get('/api/graph', (req, res) => {
@@ -1790,211 +1892,228 @@ app.get('*', (req, res) => {
   else res.status(404).json({ error: 'Frontend not built yet. Run: npm run build -w frontend' })
 })
 
-// \u2500\u2500 Start \u2500\u2500
-initializeDatabase().then(async () => {
-  server.listen(PORT, () => {
-    console.log(`\u2713 Mnemosyne backend running on http://localhost:${PORT}`)
-    console.log(`\u2713 WebSocket ready`)
-    console.log(`\u2713 DIKW transform engine loaded`)
-    console.log(`\u2713 MCP endpoint at POST /api/mcp`)
-    console.log(`\u2713 Recommendation engine loaded`)
+// ── Session ingest + DIKW (shared by the local file watcher and POST /<secret>/api/ingest) ──
+const dikwState = new Map()   // projectId -> { isTransforming }
+const dikwTimers = new Map()  // projectId -> timeout
+const DIKW_DELAY_MS = Number(process.env.MNEMO_DIKW_DELAY_MS || 180000)
+const DIKW_MAX_D = Number(process.env.MNEMO_DIKW_MAX_D || 150)
 
-    // Start file watcher for auto-capture
-    try {
-      // Session-complete detection: only import D nodes after AI finishes responding
-      const dikwState = new Map() // projectId -> { isTransforming }
-      const sessionImported = new Map() // filePath -> lastImportedSize (avoid re-importing same content)
+function getNodesByType(projectId, type) {
+  return dbAll('SELECT * FROM nodes WHERE project_id = ? AND type = ? ORDER BY created_at', [projectId, type]).map(d => ({
+    id: d.id, type: d.type, projectId: d.project_id,
+    content: d.content, tags: JSON.parse(d.tags || '[]'),
+    sourcePlatform: d.source_platform, createdAt: d.created_at
+  }))
+}
 
-      function isSessionComplete(filePath, sessionType) {
-        // Read the last few lines of the JSONL to check for completion markers
-        try {
-          const content = fs.readFileSync(filePath, 'utf-8')
-          const lines = content.trim().split('\n')
-          // Check last 3 lines for completion markers
-          for (let i = Math.max(0, lines.length - 3); i < lines.length; i++) {
-            try {
-              const event = JSON.parse(lines[i])
-              if (sessionType === 'codex') {
-                // Codex: look for event_msg with payload.type === 'task_complete'
-                if (event.type === 'event_msg' && event.payload?.type === 'task_complete') return true
-              } else if (sessionType === 'claude-code') {
-                // Claude Code: look for type === 'last-prompt'
-                if (event.type === 'last-prompt') return true
-              }
-            } catch {}
-          }
-          return false
-        } catch { return false }
-      }
-
-      function getNodesByType(projectId, type) {
-        const rows = db.exec("SELECT * FROM nodes WHERE project_id = '" + projectId.replace(/'/g, "''") + "' AND type = '" + type + "'")
-        if (!rows.length || !rows[0].values.length) return []
-        const cols = rows[0].columns
-        return rows[0].values.map(row => {
-          const obj = {}; cols.forEach((c, i) => { obj[c] = row[i] }); return obj
-        }).map(d => ({
-          id: d.id, type: d.type, projectId: d.project_id,
-          content: d.content, tags: JSON.parse(d.tags || '[]'),
-          sourcePlatform: d.source_platform, createdAt: d.created_at
-        }))
-      }
-
-      function applyActions(actions, type, projectId, fromNodeIds, connLabel) {
-        const now = new Date().toISOString()
-        const resultIds = []
-        for (const act of (actions || [])) {
-          if (act.action === 'UPDATE' && act.existing_id) {
-            dbRun("UPDATE nodes SET content = ?, updated_at = ? WHERE id = ? AND project_id = ?",
-              [act.content, now, act.existing_id, projectId])
-            resultIds.push(act.existing_id)
-            console.log(`    ✏️  Updated ${type} node: ${act.existing_id.substring(0, 20)}...`)
-          } else {
-            const prefix = type === 'I' ? 'info' : type === 'K' ? 'know' : 'wisdom'
-            const newId = prefix + '_' + uuidv4()
-            const tags = type === 'W'
-              ? ['auto-transformed', 'ai-generated', 'meta-judgment', 'context-dependent']
-              : type === 'K'
-              ? ['auto-transformed', 'ai-generated', 'skill', 'reusable']
-              : ['auto-transformed', 'ai-generated']
-            const sp = type === 'W' ? 'meta-analysis' : type === 'K' ? 'synthesis' : 'mixed'
-            insertNodeToDb({ id: newId, type, projectId, sourcePlatform: sp, content: act.content, tags, createdAt: now })
-            resultIds.push(newId)
-            console.log(`    ➕ Created ${type} node: ${newId.substring(0, 20)}...`)
-          }
-        }
-        for (const rid of resultIds) {
-          const oldConns = db.exec("SELECT id FROM connections WHERE to_node_id = '" + rid.replace(/'/g, "''") + "' AND label = '" + connLabel + "'")
-          if (oldConns.length && oldConns[0].values.length) {
-            const ids = oldConns[0].values.map(r => "'" + r[0] + "'").join(',')
-            dbRun("DELETE FROM connections WHERE id IN (" + ids + ")")
-          }
-          for (const fid of fromNodeIds) {
-            const connId = 'conn_' + fid.substring(0, 20) + '_' + rid.substring(0, 20)
-            insertConnectionToDb({ id: connId, fromNodeId: fid, toNodeId: rid, label: connLabel })
-          }
-        }
-        return resultIds
-      }
-
-      async function runSmartDIKW(projectId, projectName) {
-        const state = dikwState.get(projectId) || {}
-        if (state.isTransforming) { console.log('  DIKW already running, skip'); return }
-        state.isTransforming = true
-        dikwState.set(projectId, state)
-        try {
-          const dNodes = getNodesByType(projectId, 'D')
-          if (!dNodes.length) return
-          console.log(`  🧠 Running smart DIKW on ${dNodes.length} D nodes for "${projectName}"...`)
-
-          const existingI = getNodesByType(projectId, 'I')
-          const iResult = await transformDtoI_upsert(dNodes, existingI, { id: projectId })
-          const iIds = applyActions(iResult.actions, 'I', projectId, dNodes.map(d => d.id), 'contextualizes')
-
-          const currentI = getNodesByType(projectId, 'I')
-          const existingK = getNodesByType(projectId, 'K')
-          if (currentI.length) {
-            const kResult = await transformItoK_upsert(currentI, existingK, { id: projectId })
-            const kIds = applyActions(kResult.actions, 'K', projectId, currentI.map(i => i.id), 'synthesizes')
-
-            const currentK = getNodesByType(projectId, 'K')
-            const existingW = getNodesByType(projectId, 'W')
-            if (currentK.length) {
-              const wResult = await transformKtoW_upsert(currentK, existingW, { id: projectId })
-              applyActions(wResult.actions, 'W', projectId, currentK.map(k => k.id), 'judges')
-            }
-          }
-
-          saveDb()
-          broadcastToClients({ type: 'graph:updated', data: getGraph() })
-          console.log(`  ✓ Smart DIKW complete for "${projectName}"`)
-        } catch (e) {
-          console.error('Smart DIKW error:', e.message)
-        } finally {
-          const s = dikwState.get(projectId) || {}
-          s.isTransforming = false
-          dikwState.set(projectId, s)
-        }
-      }
-
-      startFileWatcher(async (session) => {
-        console.log(`📡 File changed: ${path.basename(session.path)} (${session.type})`)
-        try {
-          // Step 1: Check if the AI session is complete
-          if (!isSessionComplete(session.path, session.type)) {
-            console.log(`  ⏳ Session still in progress, waiting...`)
-            return
-          }
-          console.log(`  ✅ Session complete! Importing...`)
-
-          // Step 2: Check if we already imported this exact file content
-          const fileSize = fs.statSync(session.path).size
-          if (sessionImported.get(session.path) === fileSize) {
-            console.log(`  Skipped (already imported at this size: ${fileSize})`)
-            return
-          }
-
-          // Step 3: Parse the session file
-          const fileContent = fs.readFileSync(session.path, 'utf-8')
-          if (fileContent.length < 100) return
-
-          let dataNodes = []
-          let sessionId = null
-          let projectName = null
-
-          if (session.type === 'codex') {
-            const result = importCodex(fileContent)
-            dataNodes = result.nodes
-            sessionId = result.sessionId
-            projectName = result.projectName
-          } else if (session.type === 'claude-code') {
-            const result = importClaudeCode(fileContent)
-            dataNodes = result.nodes
-            sessionId = result.sessionId || ('cc_' + path.basename(session.path, '.jsonl'))
-            projectName = result.projectName
-          }
-
-          if (dataNodes.length === 0) {
-            console.log(`  Skipped (no meaningful messages): ${session.path}`)
-            return
-          }
-
-          const projectId = 'project_' + sessionId.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 50)
-          const existing = dbGet("SELECT id FROM projects WHERE id = ?", [projectId])
-          const now = new Date().toISOString()
-
-          if (existing) {
-            // Clear old D nodes only, keep I/K/W for upsert
-            const dNodeIds = db.exec("SELECT id FROM nodes WHERE project_id = '" + projectId.replace(/'/g, "''") + "' AND type = 'D'")
-            if (dNodeIds.length && dNodeIds[0].values.length) {
-              const ids = dNodeIds[0].values.map(r => "'" + r[0] + "'").join(',')
-              dbRun("DELETE FROM connections WHERE from_node_id IN (" + ids + ")")
-            }
-            dbRun("DELETE FROM nodes WHERE project_id = ? AND type = 'D'", [projectId])
-          } else {
-            dbRun('INSERT OR IGNORE INTO projects (id, name, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-              [projectId, projectName, '#667eea', now, now])
-          }
-
-          // Step 4: Import all D nodes
-          dataNodes.forEach(node => { node.projectId = projectId; insertNodeToDb(node) })
-          saveDb()
-          broadcastToClients({ type: 'graph:updated', data: getGraph() })
-          sessionImported.set(session.path, fileSize)
-          console.log(`  📦 Imported ${dataNodes.length} D nodes into "${projectName}"`)
-
-          // Step 5: Run DIKW immediately (session is already complete)
-          await runSmartDIKW(projectId, projectName)
-
-        } catch (e) {
-          console.error('Auto-import error:', e.message)
-        }
-      })
-      console.log(`✓ File watcher active (monitoring ~/.claude/projects/ and ~/.codex/sessions/)`)
-    } catch (e) {
-      console.log(`⚠ File watcher skipped: ${e.message}`)
+function applyActions(actions, type, projectId, fromNodeIds, connLabel) {
+  const now = new Date().toISOString()
+  const resultIds = []
+  for (const act of (actions || [])) {
+    if (!act || !act.content) continue
+    if (act.action === 'UPDATE' && act.existing_id) {
+      dbRun('UPDATE nodes SET content = ?, updated_at = ? WHERE id = ? AND project_id = ?', [act.content, now, act.existing_id, projectId])
+      resultIds.push(act.existing_id)
+    } else {
+      const prefix = type === 'I' ? 'info' : type === 'K' ? 'know' : 'wisdom'
+      const newId = prefix + '_' + uuidv4()
+      const tags = type === 'W'
+        ? ['auto-transformed', 'ai-generated', 'meta-judgment', 'context-dependent']
+        : type === 'K'
+        ? ['auto-transformed', 'ai-generated', 'skill', 'reusable']
+        : ['auto-transformed', 'ai-generated']
+      const sp = type === 'W' ? 'meta-analysis' : type === 'K' ? 'synthesis' : 'mixed'
+      insertNodeToDb({ id: newId, type, projectId, sourcePlatform: sp, content: act.content, tags, createdAt: now })
+      resultIds.push(newId)
     }
+  }
+  for (const rid of resultIds) {
+    dbRun('DELETE FROM connections WHERE to_node_id = ? AND label = ?', [rid, connLabel])
+    for (const fid of fromNodeIds) {
+      insertConnectionToDb({ id: 'conn_' + fid.substring(0, 20) + '_' + rid.substring(0, 20), fromNodeId: fid, toNodeId: rid, label: connLabel })
+    }
+  }
+  return resultIds
+}
+
+async function runSmartDIKW(projectId, projectName) {
+  const state = dikwState.get(projectId) || {}
+  if (state.isTransforming) return
+  state.isTransforming = true
+  dikwState.set(projectId, state)
+  try {
+    const dNodes = getNodesByType(projectId, 'D').slice(-DIKW_MAX_D)
+    if (!dNodes.length) return
+    console.log(`  🧠 DIKW on ${dNodes.length} D nodes for "${projectName}"`)
+    const iResult = await transformDtoI_upsert(dNodes, getNodesByType(projectId, 'I'), { id: projectName || projectId })
+    applyActions(iResult.actions, 'I', projectId, dNodes.map(d => d.id), 'contextualizes')
+    const currentI = getNodesByType(projectId, 'I')
+    if (currentI.length) {
+      const kResult = await transformItoK_upsert(currentI, getNodesByType(projectId, 'K'), { id: projectName || projectId })
+      applyActions(kResult.actions, 'K', projectId, currentI.map(i => i.id), 'synthesizes')
+      const currentK = getNodesByType(projectId, 'K')
+      if (currentK.length) {
+        const wResult = await transformKtoW_upsert(currentK, getNodesByType(projectId, 'W'), { id: projectName || projectId })
+        applyActions(wResult.actions, 'W', projectId, currentK.map(k => k.id), 'judges')
+      }
+    }
+    dbRun('UPDATE projects SET last_dikw = ? WHERE id = ?', [new Date().toISOString(), projectId])
+    saveDb()
+    broadcastToClients({ type: 'graph:updated', data: getGraph() })
+    console.log(`  ✓ DIKW complete for "${projectName}"`)
+  } catch (e) {
+    console.error('DIKW error:', e.message)
+  } finally {
+    const s = dikwState.get(projectId) || {}
+    s.isTransforming = false
+    dikwState.set(projectId, s)
+  }
+}
+
+function scheduleDIKW(projectId, projectName) {
+  clearTimeout(dikwTimers.get(projectId))
+  dikwTimers.set(projectId, setTimeout(() => { dikwTimers.delete(projectId); runSmartDIKW(projectId, projectName) }, DIKW_DELAY_MS))
+}
+
+// ── Map a session to a Claude Project (space) ──
+const normPath = (p) => String(p || '').replace(/\\+/g, '/').replace(/^\/+\?\//, '').replace(/\/+$/, '').toLowerCase()
+function countHits(hay, needle, cap = 20) {
+  if (!needle) return 0
+  let n = 0, i = hay.indexOf(needle)
+  while (i !== -1 && n < cap) { n++; i = hay.indexOf(needle, i + needle.length) }
+  return n
+}
+function detectSpace(cwd, raw, { mentions = true } = {}) {
+  const spaces = dbAll('SELECT id, name, folders FROM spaces').map(s => ({ ...s, folders: JSON.parse(s.folders || '[]').map(normPath).filter(f => f.length > 3) }))
+  if (!spaces.length) return null
+  // 1) working directory inside a Project's linked folder (deepest folder wins)
+  const c = normPath(cwd)
+  let best = null, bestLen = 0
+  if (c) for (const s of spaces) for (const f of s.folders) {
+    if ((c === f || c.startsWith(f + '/')) && f.length > bestLen) { best = s.id; bestLen = f.length }
+  }
+  if (best || !mentions) return best
+  // 2) the transcript keeps touching a Project's folders (Cowork mounts them at /sessions/<x>/mnt/<folder name>).
+  //    A path inside a deeper Project folder counts only for that deeper folder.
+  const low = (raw.length > 4e6 ? raw.slice(0, 4e6) : raw).toLowerCase().replace(/\\+/g, '/')
+  const all = [...new Set(spaces.flatMap(s => s.folders))]
+  const hits = new Map(all.map(f => [f, countHits(low, f)]))
+  const own = (f) => Math.max(0, hits.get(f) - all.filter(g => g !== f && g.startsWith(f + '/')).reduce((n, g) => n + hits.get(g), 0))
+  let top = null, topScore = 1
+  for (const s of spaces) {
+    let score = 0
+    for (const f of s.folders) {
+      const base = f.split('/').pop()
+      score += own(f) * 2 + countHits(low, `/mnt/${base}/`) + countHits(low, `/mnt/${base}"`)
+    }
+    if (score > topScore) { top = s.id; topScore = score }
+  }
+  return top
+}
+
+/** Parse one session transcript and replace that session's D nodes. */
+async function ingestSession({ platform, content, filePath = '', fileSize = 0, fileTime = null, dikw = true }) {
+  if (!content || content.length < 100) return { skipped: 'too small' }
+  const base = path.basename(filePath.replace(/\\/g, '/'), '.jsonl')
+  const parentDir = path.basename(path.dirname(filePath.replace(/\\/g, '/')))
+  const fallbackId = platform === 'cowork' ? parentDir : base
+  const parsed = platform === 'codex'
+    ? importCodex(content, { fileTime })
+    : importClaudeCode(content, { platform, fallbackId, fileTime })
+  if (!parsed.nodes.length) return { skipped: 'no messages' }
+
+  // Cowork's audit.jsonl session_id changes per run; the folder (local_<uuid>) is the stable id
+  const sid = platform === 'cowork' && /^local_/.test(parentDir) ? parentDir : parsed.sessionId
+  const projectId = 'project_' + sid.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 50)
+  const existing = dbGet('SELECT * FROM projects WHERE id = ?', [projectId])
+  // Unchanged file: skip, unless it was stored before Claude Projects were known (then re-file it once)
+  const spacesKnown = (dbGet('SELECT COUNT(*) AS c FROM spaces')?.c || 0) > 0
+  if (existing && fileSize && existing.file_size === fileSize && (existing.space_checked || !spacesKnown)) return { skipped: 'unchanged', projectId }
+  // Codex threads rebuilt from its SQLite store may be partial projections; never let them shrink a session
+  if (existing && filePath.startsWith('codex-sqlite:')) {
+    const stored = dbGet(`SELECT COUNT(*) AS c FROM nodes WHERE project_id = ? AND type = 'D'`, [projectId])?.c || 0
+    if (stored > parsed.nodes.length) return { skipped: `kept ${stored} stored turns`, projectId }
+  }
+
+  const now = new Date().toISOString()
+  const workspace = parsed.workspace || null
+  let spaceId = null
+  // Scheduled-task runs are cross-cutting automation: file them only by working directory, not by folders they touch
+  try { spaceId = detectSpace(parsed.cwd, content, { mentions: !parsed.title.startsWith('定时任务') }) } catch (e) { console.error('detectSpace:', e.message) }
+  if (existing) {
+    const old = dbAll(`SELECT id FROM nodes WHERE project_id = ? AND type = 'D'`, [projectId]).map(r => r.id)
+    for (let i = 0; i < old.length; i += 500) {
+      const chunk = old.slice(i, i + 500)
+      dbRun(`DELETE FROM connections WHERE from_node_id IN (${chunk.map(() => '?').join(',')})`, chunk)
+    }
+    dbRun(`DELETE FROM nodes WHERE project_id = ? AND type = 'D'`, [projectId])
+    dbRun(`UPDATE projects SET name = ?, workspace = COALESCE(?, workspace), platform = ?, session_path = ?, file_size = ?, last_ingest = ?, updated_at = ?, space_id = ?, space_checked = ? WHERE id = ?`,
+      [parsed.title || existing.name, workspace, platform, filePath, fileSize || null, now, now, spaceId, spacesKnown ? now : null, projectId])
+  } else {
+    const color = PROJECT_COLORS[_colorIdx++ % PROJECT_COLORS.length]
+    dbRun(`INSERT INTO projects (id, name, color, created_at, updated_at, workspace, platform, session_path, file_size, last_ingest, space_id, space_checked)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [projectId, parsed.title, color, parsed.nodes[0].createdAt || now, now, workspace, platform, filePath, fileSize || null, now, spaceId, spacesKnown ? now : null])
+  }
+  for (const node of parsed.nodes) { node.projectId = projectId; insertNodeToDb(node) }
+  saveDb()
+  broadcastToClients({ type: 'graph:updated', data: getGraph() })
+  console.log(`📦 ${platform}: ${parsed.nodes.length} D nodes → "${parsed.title}" (${projectId})`)
+  // Scheduled-task runs repeat the same prompt; keep their reports searchable but don't spend LLM calls on them
+  const distill = dikw && parsed.nodes.length >= 4 && !parsed.title.startsWith('定时任务') && !!(process.env.MNEMO_LLM_API_KEY || process.env.OPENAI_API_KEY)
+  if (distill) scheduleDIKW(projectId, parsed.title)
+  const space = spaceId ? dbGet('SELECT name FROM spaces WHERE id = ?', [spaceId])?.name : null
+  return { projectId, title: parsed.title, workspace, space, nodes: parsed.nodes.length, dikw: distill }
+}
+
+// ── Start ──
+function listenOn(srv, host) {
+  srv.once('error', (e) => {
+    console.error(`listen ${host || '*'}:${PORT} failed (${e.code}); retrying in 10s`)
+    setTimeout(() => listenOn(srv, host), 10000)
   })
+  const cb = () => console.log(`✓ Mnemosyne listening on http://${host || 'localhost'}:${PORT}`)
+  if (host) srv.listen(PORT, host, cb)
+  else srv.listen(PORT, cb)
+}
+
+initializeDatabase().then(async () => {
+  if (BIND_HOSTS.length) {
+    BIND_HOSTS.forEach((h, i) => {
+      const srv = i === 0 ? server : createServer(app)
+      if (i > 0) attachWs(srv)
+      listenOn(srv, h)
+    })
+  } else listenOn(server, null)
+  console.log(`✓ MCP: ${MNEMO_SECRET ? 'POST /<secret>/mcp (remote)' : 'remote disabled (no MNEMO_SECRET)'}; legacy JSON at POST /api/mcp`)
+
+  // Catch up distillation that a restart interrupted (recent ingests never distilled since)
+  if (process.env.MNEMO_LLM_API_KEY || process.env.OPENAI_API_KEY) {
+    const since = new Date(Date.now() - 14 * 86400000).toISOString()
+    const pending = dbAll(`SELECT p.id, p.name FROM projects p WHERE p.last_ingest IS NOT NULL AND (p.last_dikw IS NULL OR p.last_dikw < p.last_ingest)
+      AND (SELECT MAX(created_at) FROM nodes n WHERE n.project_id = p.id AND n.type = 'D') >= ?
+      AND p.name NOT LIKE '定时任务%' AND (SELECT COUNT(*) FROM nodes n WHERE n.project_id = p.id AND n.type = 'D') >= 4`, [since])
+    pending.forEach((p, i) => setTimeout(() => runSmartDIKW(p.id, p.name), 60000 + i * 20000))
+    if (pending.length) console.log(`✓ ${pending.length} sessions queued for distillation`)
+  }
+
+  if (!WATCH_LOCAL) return
+  try {
+    const sessionImported = new Map()
+    startFileWatcher(async (session) => {
+      try {
+        const fileSize = fs.statSync(session.path).size
+        if (sessionImported.get(session.path) === fileSize) return
+        const content = fs.readFileSync(session.path, 'utf-8')
+        const r = await ingestSession({ platform: session.type, content, filePath: session.path, fileSize })
+        sessionImported.set(session.path, fileSize)
+        if (r.skipped) console.log(`  skipped ${path.basename(session.path)}: ${r.skipped}`)
+      } catch (e) { console.error('Auto-import error:', e.message) }
+    })
+    console.log('✓ Local file watcher active')
+  } catch (e) {
+    console.log(`⚠ File watcher skipped: ${e.message}`)
+  }
 }).catch(err => {
   console.error('Failed to initialize database:', err)
   process.exit(1)

@@ -1,0 +1,31 @@
+[Unit]
+Description=Mnemosyne shared AI memory (remote MCP + DIKW)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=mnemosyne
+Group=mnemosyne
+EnvironmentFile=/etc/mnemosyne/env
+Environment=NODE_ENV=production HOME=/var/lib/mnemosyne MNEMO_DB=/var/lib/mnemosyne/mnemosyne.db NODE_NO_WARNINGS=1
+WorkingDirectory=/opt/mnemosyne/backend
+ExecStart=__NODE__ server.js
+Restart=always
+RestartSec=5
+MemoryMax=4G
+StateDirectory=mnemosyne
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadOnlyPaths=/opt/mnemosyne /etc/mnemosyne
+
+[Install]
+WantedBy=multi-user.target

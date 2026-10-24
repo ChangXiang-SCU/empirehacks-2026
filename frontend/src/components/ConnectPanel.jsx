@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import './ConnectPanel.css'
 
-const API_BASE = 'http://localhost:3001'
+const API_BASE = ''
 
 export default function ConnectPanel({ onClose }) {
   const [tab, setTab] = useState('skills') // 'mcps' | 'skills'
