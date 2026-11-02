@@ -1,13 +1,23 @@
 import { v4 as uuidv4 } from 'uuid'
 
 // ── AI-Powered DIKW Transformation Engine ──
-// Uses OpenAI API (GPT-4.1) for intelligent DIKW transforms.
-// Easy to swap to Anthropic API later by changing callLLM().
+// Two providers:
+//   anthropic  Claude via the native Messages API (MNEMO_LLM_PROVIDER=anthropic, or a claude-* model, or ANTHROPIC_API_KEY)
+//   openai     any OpenAI-compatible /chat/completions endpoint (OpenAI, a local llama.cpp / vLLM server, ...)
+// Settings: MNEMO_LLM_PROVIDER, MNEMO_LLM_MODEL, MNEMO_LLM_API_KEY, MNEMO_LLM_BASE_URL, MNEMO_LLM_MAX_TOKENS, MNEMO_LLM_THINKING.
+const ENV = process.env
+const LLM_KEY = ENV.MNEMO_LLM_API_KEY || ENV.ANTHROPIC_API_KEY || ENV.OPENAI_API_KEY || ''
+const PROVIDER = ENV.MNEMO_LLM_PROVIDER
+  || (/^claude/i.test(ENV.MNEMO_LLM_MODEL || '') || /anthropic\.com/.test(ENV.MNEMO_LLM_BASE_URL || '') || /^sk-ant-/.test(LLM_KEY) || (!ENV.MNEMO_LLM_API_KEY && !ENV.OPENAI_API_KEY && ENV.ANTHROPIC_API_KEY) ? 'anthropic' : 'openai')
+const MODEL = ENV.MNEMO_LLM_MODEL || (PROVIDER === 'anthropic' ? 'claude-haiku-5-5' : 'gpt-5.4')
+const BASE_URL = (ENV.MNEMO_LLM_BASE_URL || (PROVIDER === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1')).replace(/\/$/, '')
+const MAX_OUT = Number(ENV.MNEMO_LLM_MAX_TOKENS || (PROVIDER === 'anthropic' ? 8000 : 4000))
+// Distillation needs no up-front reasoning. Haiku 5.5 accepts thinking "disabled"; Sonnet 5.5 rejects it and takes
+// "between_tools" (no thinking before the answer when there are no tools). "default" sends nothing.
+const THINKING = ENV.MNEMO_LLM_THINKING || (/haiku/i.test(MODEL) ? 'disabled' : /sonnet-5/i.test(MODEL) ? 'between_tools' : 'default')
 
-// Any OpenAI-compatible endpoint works (e.g. a local llama.cpp server): set MNEMO_LLM_BASE_URL / MNEMO_LLM_MODEL.
-const OPENAI_URL = (process.env.MNEMO_LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '') + '/chat/completions'
-const MODEL = process.env.MNEMO_LLM_MODEL || 'gpt-5.4'
-const MAX_OUT = Number(process.env.MNEMO_LLM_MAX_TOKENS || 4000)
+export function llmConfigured() { return !!LLM_KEY }
+export function llmDescription() { return `${PROVIDER}:${MODEL}` }
 
 // ── Transform lock to prevent concurrent transforms on same project ──
 const _locks = new Map()
@@ -22,18 +32,33 @@ async function withLock(key, fn) {
 
 // ── LLM API helper ──
 export async function callLLM(systemPrompt, userPrompt) {
-  const apiKey = process.env.MNEMO_LLM_API_KEY || process.env.OPENAI_API_KEY
-  if (!apiKey) {
-    console.error('OPENAI_API_KEY not set - using fallback')
+  if (!LLM_KEY) {
+    console.error('No LLM API key (MNEMO_LLM_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY) - using fallback')
     return null
   }
   try {
-    const res = await fetch(OPENAI_URL, {
+    if (PROVIDER === 'anthropic') {
+      const res = await fetch(BASE_URL + '/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': LLM_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: MAX_OUT,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+          ...(THINKING !== 'default' ? { thinking: { type: THINKING } } : {})
+        })
+      })
+      if (!res.ok) {
+        console.error(`Claude API error ${res.status}:`, (await res.text()).slice(0, 300))
+        return null
+      }
+      const data = await res.json()
+      return (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim() || null
+    }
+    const res = await fetch(BASE_URL + '/chat/completions', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LLM_KEY}` },
       body: JSON.stringify({
         model: MODEL,
         messages: [
@@ -45,8 +70,7 @@ export async function callLLM(systemPrompt, userPrompt) {
       })
     })
     if (!res.ok) {
-      const err = await res.text()
-      console.error(`OpenAI API error ${res.status}:`, err.slice(0, 200))
+      console.error(`LLM API error ${res.status}:`, (await res.text()).slice(0, 300))
       return null
     }
     const data = await res.json()
