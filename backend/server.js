@@ -12,6 +12,8 @@ import fs from 'fs'
 import crypto from 'crypto'
 import zlib from 'zlib'
 import { createMcpHandler } from './lib/remoteMcp.js'
+import { ingestKnowledge, reconcileProjectSpaces } from './lib/projectKnowledge.js'
+import { ensureFilingTables, applyMetaToIngest, upsertSessionMeta, refileNotes } from './lib/filing.js'
 import { cleanMessage, makeTitle, workspaceFromCwd } from './lib/text.js'
 
 // Import custom modules
@@ -109,6 +111,8 @@ async function initializeDatabase() {
   const schema = fs.readFileSync(join(__dirname, 'db/schema.sql'), 'utf-8')
   db.exec(schema)
   migrateDb()
+  const refiled = refileNotes({ dbAll, dbGet, dbRun })
+  if (refiled) console.log(`✓ Filed ${refiled} note collections under their Claude Projects`)
 
   const row = dbGet('SELECT COUNT(*) as count FROM nodes')
   if (row && row.count === 0) {
@@ -166,7 +170,8 @@ function seedDatabase() {
 function migrateDb() {
   const cols = new Set(dbAll('PRAGMA table_info(projects)').map(c => c.name))
   db.run(`CREATE TABLE IF NOT EXISTS spaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, project_uuids TEXT, folders TEXT, updated_at TEXT)`)
-  for (const [c, t] of [['workspace', 'TEXT'], ['platform', 'TEXT'], ['session_path', 'TEXT'], ['file_size', 'INTEGER'], ['last_ingest', 'TEXT'], ['last_dikw', 'TEXT'], ['space_id', 'TEXT'], ['space_checked', 'TEXT']]) {
+  ensureFilingTables({ dbRun })
+  for (const [c, t] of [['workspace', 'TEXT'], ['platform', 'TEXT'], ['session_path', 'TEXT'], ['file_size', 'INTEGER'], ['last_ingest', 'TEXT'], ['last_dikw', 'TEXT'], ['space_id', 'TEXT'], ['space_checked', 'TEXT'], ['content_hash', 'TEXT']]) {
     if (!cols.has(c)) db.run(`ALTER TABLE projects ADD COLUMN ${c} ${t}`)
   }
   // Repair names produced by the old importers ("Codex: <recommended_plugins> ...")
@@ -301,9 +306,42 @@ if (MNEMO_SECRET) {
         const sid = byBase.get(String(p.workspace).toLowerCase())
         if (sid) { dbRun('UPDATE projects SET space_id = ? WHERE id = ?', [sid, p.id]); filed++ }
       }
+      const merged = reconcileProjectSpaces(mcpStore)
+      const notes = refileNotes(mcpStore)
       saveDb()
-      res.json({ ok: true, spaces: dbGet('SELECT COUNT(*) AS c FROM spaces')?.c || 0, filed })
+      res.json({ ok: true, spaces: dbGet('SELECT COUNT(*) AS c FROM spaces')?.c || 0, filed, merged, notes })
     } catch (e) { res.status(500).json({ error: e.message }) }
+  })
+  // Claude Project material (description, instructions, knowledge files, Cowork project memory); see lib/projectKnowledge.js
+  app.post(base + '/api/knowledge', express.raw({ type: '*/*', limit: '200mb' }), async (req, res) => {
+    try {
+      let buf = req.body
+      if (!Buffer.isBuffer(buf) || !buf.length) return res.status(400).json({ error: 'empty body' })
+      if (req.get('content-encoding') === 'gzip' || req.is('application/gzip')) buf = zlib.gunzipSync(buf)
+      const result = await ingestKnowledge(mcpStore, JSON.parse(buf.toString('utf-8')))
+      reconcileProjectSpaces(mcpStore)
+      if (refileNotes(mcpStore)) saveDb()
+      if (!result.skipped) broadcastToClients({ type: 'graph:updated', data: getGraph() })
+      res.json(result)
+    } catch (e) {
+      console.error('Knowledge error:', e)
+      res.status(500).json({ error: e.message })
+    }
+  })
+  // Claude desktop's own session metadata: app titles, and the Project each Cowork session belongs to (lib/filing.js)
+  app.post(base + '/api/sessions-meta', express.raw({ type: '*/*', limit: '50mb' }), (req, res) => {
+    try {
+      let buf = req.body
+      if (!Buffer.isBuffer(buf) || !buf.length) return res.status(400).json({ error: 'empty body' })
+      if (req.get('content-encoding') === 'gzip' || req.is('application/gzip')) buf = zlib.gunzipSync(buf)
+      const list = JSON.parse(buf.toString('utf-8')).sessions || []
+      const r = upsertSessionMeta(mcpStore, list)
+      saveDb()
+      res.json({ ok: true, received: list.length, ...r })
+    } catch (e) {
+      console.error('Session meta error:', e)
+      res.status(500).json({ error: e.message })
+    }
   })
   app.get(base + '/api/health', (req, res) => res.json({ ok: true, nodes: dbGet('SELECT COUNT(*) AS c FROM nodes')?.c || 0, version: dataVersion }))
   app.all(base + '/*', (req, res) => res.status(404).json({ error: 'not found' }))
@@ -2040,6 +2078,10 @@ async function ingestSession({ platform, content, filePath = '', fileSize = 0, f
   let spaceId = null
   // Scheduled-task runs are cross-cutting automation: file them only by working directory, not by folders they touch
   try { spaceId = detectSpace(parsed.cwd, content, { mentions: !parsed.title.startsWith('定时任务') }) } catch (e) { console.error('detectSpace:', e.message) }
+  // The Claude app's own record (Project, title) wins over the heuristics when the collector has sent it
+  const fromApp = applyMetaToIngest(mcpStore, sid, spaceId, parsed.title)
+  spaceId = fromApp.spaceId
+  parsed.title = fromApp.title
   if (existing) {
     const old = dbAll(`SELECT id FROM nodes WHERE project_id = ? AND type = 'D'`, [projectId]).map(r => r.id)
     for (let i = 0; i < old.length; i += 500) {

@@ -32,6 +32,23 @@ one of the Project's folders, or otherwise when the transcript keeps touching a 
 `/sessions/<x>/mnt/<folder>`; a path inside a deeper Project folder only counts for that one). `list_projects` with no arguments lists
 Projects; `get_project_context`, `search_memory` and `record_learning` accept a Project name.
 
+Claude desktop also keeps a metadata file per session (`<org>/local_<id>.json` for Cowork, `claude-code-sessions/<account>/<org>/local_<id>.json`
+for Claude Code in the app). The collector sends the changed ones to `POST /<secret>/api/sessions-meta`: the app's title replaces the
+first-message title, and when the app records the Project a Cowork session was started in (`spaceId`), that wins over the folder
+rules above. Notes saved with `record_learning` under a Project name Mnemosyne did not know yet are filed under that Project as soon
+as it appears.
+
+Each Project's own material is imported too (`POST /<secret>/api/knowledge`, one Project per request, only when its files change):
+- from `<org>/.project-cache/<claude.ai uuid>/`: the claude.ai Project's name, description, custom instructions and knowledge
+  files (text files as is, PDF text extracted on the server with `unpdf`; images and spreadsheets are only listed);
+- from `<org>/spaces/<id>/memory/*.md`: Cowork's per-Project memory notes.
+
+They are stored as `kb_<uuid>` / `kbmem_<spaceId>` (platform `claude-project`), chunked into ~3.5k-character entries, with
+16+ digit numbers and Chinese ID numbers masked. A claude.ai Project that no Cowork space links gets its own entry in the Project
+list. `get_project_context` puts this material first; `recent_activity` leaves it out. Desktop only caches Projects that were
+opened in the app, so a Project used only on the web shows up after it has been opened once in Claude desktop.
+Set `"projectKnowledge": false` in `collector.json` to turn this off.
+
 ## Install
 
 Server (Ubuntu, Node 20+, Caddy with an existing HTTPS site block that ends in `handle { respond 404 }`):
