@@ -8,14 +8,15 @@
     "db:init": "node scripts/init-db.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "chokidar": "^3.6.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "multer": "^1.4.5-lts.1",
     "sql.js": "^1.9.0",
+    "unpdf": "1.6.2",
     "uuid": "^9.0.1",
     "ws": "^8.15.0",
-    "@modelcontextprotocol/sdk": "^1.32.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {

@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { v4 as uuidv4 } from 'uuid'
 import { queryTerms, snippet, makeTitle } from './text.js'
 import { generateSkillMd } from './dikwEngine.js'
+import { KB_PLATFORM } from './projectKnowledge.js'
 
 const TYPE_WEIGHT = { W: 1.6, K: 1.5, I: 1.2, D: 0.6 }
 const TYPE_NAME = { D: 'Data', I: 'Information', K: 'Knowledge', W: 'Wisdom' }
@@ -18,7 +19,9 @@ Use it when:
 - the user asks what they've been working on lately -> recent_activity.
 - you need background on a project/repo/folder -> get_project_context (accepts a name, workspace folder, or id).
 - at the end of substantial work, or when the user states a durable decision, preference or fact worth reusing in other tools -> record_learning (one self-contained paragraph; type K for reusable know-how, W for judgment/principles, I for facts/status).
+IMPORTANT for claude.ai chat and Cowork sessions that run in Anthropic's cloud: their transcripts are NOT captured automatically (only local Claude Code / Cowork / Codex sessions and the bots are). So in those sessions, before you finish any substantial piece of work, call record_learning once with a self-contained summary (what was asked, what was done or decided, where outputs live, open next steps), passing the Claude Project name as \`project\` and \`source: "cowork"\` or \`"claude-ai"\`. Do this without being asked; skip only trivial Q&A.
 Sessions are grouped under the user's Claude Projects (the same Projects as in the Claude app). If this conversation belongs to a Claude Project, pass that Project's name as \`project\` to get_project_context, search_memory and record_learning; list_projects shows all Projects.
+Each Claude Project's own material is stored too: its description, custom instructions, knowledge files (text and PDFs) and the Cowork project memory notes. get_project_context shows it first; search_memory searches it.
 Memory may be stale; prefer the newest entries and confirm anything that matters.`
 
 function fmtDate(s) { return (s || '').slice(0, 10) }
@@ -48,13 +51,27 @@ export function createMemoryIndex(store) {
     }
     // Activity date = newest conversation turn (D); distilled-only/manual projects use their newest entry
     for (const p of projects.values()) p.last = p.lastD || p.lastX || p.updated_at || p.created_at || ''
+    // Claude Project material: the claude.ai Project names become aliases of their space; count files per Project
+    for (const p of projects.values()) {
+      p.kb = p.platform === KB_PLATFORM
+      if (!p.kb) continue
+      const sp = spaces.get(p.space_id)
+      if (sp && p.id.startsWith('kb_')) { const a = (p.name || '').replace(/^Project knowledge · /, ''); (sp.aliases ||= []).push(a) }
+      p.files = new Set()
+    }
+    for (const n of nodes) {
+      const p = projects.get(n.project_id)
+      if (!p?.kb) continue
+      const f = (n.tags || '').match(/"file:([^"]+)"/)
+      if (f) p.files.add(f[1])
+    }
     cache = { v, projects, nodes, spaces }
     return cache
   }
 
   function projectLabel(p) {
     if (!p) return ''
-    return (p.spaceName ? `[${p.spaceName}] ` : '') + [p.platform, p.workspace, p.name].filter(Boolean).join(' · ')
+    return (p.spaceName ? `[${p.spaceName}] ` : '') + [p.platform, p.workspace && !(p.name || '').includes(p.workspace) ? p.workspace : null, p.name].filter(Boolean).join(' · ')
   }
 
   /** Claude Projects (spaces) whose name or claude.ai uuid matches q; exact name wins */
@@ -63,8 +80,9 @@ export function createMemoryIndex(store) {
     if (!q) return []
     const low = q.toLowerCase().trim()
     const all = [...spaces.values()]
-    const exact = all.filter(sp => sp.name.toLowerCase() === low || sp.id === q || sp.uuids.includes(q))
-    return exact.length ? exact : all.filter(sp => sp.name.toLowerCase().includes(low) || (low.length >= 4 && low.includes(sp.name.toLowerCase())))
+    const names = sp => [sp.name, ...(sp.aliases || [])].map(x => x.toLowerCase())
+    const exact = all.filter(sp => names(sp).includes(low) || sp.id === q || sp.uuids.includes(q))
+    return exact.length ? exact : all.filter(sp => names(sp).some(nm => nm.includes(low) || (low.length >= 4 && low.includes(nm))))
   }
 
   function resolveProjects(q) {
@@ -135,6 +153,39 @@ export function createMemoryIndex(store) {
 
 const text = (t) => ({ content: [{ type: 'text', text: t }] })
 
+/** The Claude Project's own material: overview, custom instructions, knowledge files, Cowork memory notes. */
+function projectMaterial(nodes, kbs, rel, byTask) {
+  if (!kbs.length) return ''
+  const ids = new Set(kbs.map(p => p.id))
+  const mine = nodes.filter(n => ids.has(n.project_id))
+  const tagFile = n => ((n.tags || '').match(/"file:([^"]+)"/) || [])[1] || ''
+  const one = (n, chars) => { const c = (n.content || '').trim(); return c.length > chars ? c.slice(0, chars) + ` … [get_node ${n.id}]` : c }
+  let out = ''
+  const overview = mine.filter(n => n.type === 'I' && n.project_id.startsWith('kb_'))
+  const instr = mine.filter(n => n.type === 'W' && n.project_id.startsWith('kb_'))
+  const docs = mine.filter(n => n.type === 'K' && n.project_id.startsWith('kb_'))
+  const mem = mine.filter(n => n.project_id.startsWith('kbmem_'))
+  if (overview.length || instr.length || docs.length) {
+    out += `\n## Project knowledge (from the Claude Project)\n`
+    for (const n of overview) out += one(n, 2000) + '\n'
+    if (instr.length) out += `\n### Custom instructions\n${instr.map(n => one(n, 3000)).join('\n')}\n`
+    if (docs.length) {
+      // With a task: the most relevant passages; otherwise the start of each file
+      const firsts = new Map()
+      for (const n of docs) { const f = tagFile(n); if (!firsts.has(f)) firsts.set(f, n) }
+      const chosen = byTask ? [...docs].sort((a, b) => rel(b) - rel(a)).slice(0, 6) : [...firsts.values()].slice(0, 8)
+      out += `\n### Knowledge files (${firsts.size}; ${docs.length} passages, full text via get_node or search_memory)\n${chosen.map(n => `- (${n.id}) ${one(n, 700).replace(/\n+/g, ' ')}`).join('\n')}\n`
+    }
+  }
+  if (mem.length) {
+    const index = mem.find(n => tagFile(n) === 'MEMORY.md')
+    const rest = mem.filter(n => n !== index && !/\(\d+\/\d+\)\]/.test((n.content || '').split('\n')[0]) || /\(1\/\d+\)\]/.test((n.content || '').split('\n')[0]))
+    const chosen = (byTask ? [...mem].sort((a, b) => rel(b) - rel(a)) : rest).filter(n => n !== index).slice(0, 12)
+    out += `\n## Project memory (Cowork notes)\n${index ? one(index, 2500) + '\n' : ''}${chosen.map(n => `- (${n.id}) ${one(n, 450).replace(/\n+/g, ' ')}`).join('\n')}\n`
+  }
+  return out
+}
+
 function buildServer(store, index) {
   const server = new McpServer(
     { name: 'mnemosyne', title: 'Mnemosyne memory', version: '2.0.0' },
@@ -175,7 +226,7 @@ function buildServer(store, index) {
     const since = new Date(Date.now() - days * DAY).toISOString()
     const seenSched = new Set()
     const recent = [...projects.values()]
-      .filter(p => (p.last || '') >= since && (!platform || p.platform === platform))
+      .filter(p => (p.last || '') >= since && (platform ? p.platform === platform : !p.kb))
       .sort((a, b) => (b.last || '').localeCompare(a.last || ''))
       .filter(p => {  // one line per scheduled task, however many runs
         if (!(p.name || '').startsWith('定时任务')) return true
@@ -212,21 +263,29 @@ function buildServer(store, index) {
     const { projects, spaces } = index.load()
     const nonEmpty = p => p.counts.D + p.counts.I + p.counts.K + p.counts.W > 0
     if ((view || (query ? 'sessions' : 'claude_projects')) === 'claude_projects') {
-      const rows = new Map([...spaces.values()].map(sp => [sp.id, { sp, n: 0, by: {}, last: '' }]))
+      const rows = new Map([...spaces.values()].map(sp => [sp.id, { sp, n: 0, by: {}, last: '', docs: 0, mem: 0 }]))
       let unfiled = 0
       for (const p of projects.values()) {
+        if (p.kb) {
+          const r = rows.get(p.space_id)
+          if (r) { if (p.id.startsWith('kbmem_')) r.mem += p.files.size; else r.docs += p.files.size }
+          continue
+        }
         if (!nonEmpty(p) || (platform && p.platform !== platform)) continue
         const r = rows.get(p.space_id)
         if (!r) { unfiled++; continue }
         r.n++; r.by[p.platform || 'other'] = (r.by[p.platform || 'other'] || 0) + 1
         if ((p.last || '') > r.last) r.last = p.last
       }
-      const list = [...rows.values()].sort((a, b) => (b.last || '').localeCompare(a.last || ''))
-      const lines = list.map(r => `- ${r.sp.name} · ${r.n} sessions${r.n ? ` (${Object.entries(r.by).map(([k, v]) => `${k} ${v}`).join(', ')}) · last ${fmtDate(r.last)}` : ''}`)
+      const list = [...rows.values()].sort((a, b) => (b.last || '').localeCompare(a.last || '') || a.sp.name.localeCompare(b.sp.name))
+      const lines = list.map(r => {
+        const extra = [r.docs ? `${r.docs} knowledge files` : '', r.mem ? `${r.mem} memory notes` : '', r.sp.aliases?.some(a => a !== r.sp.name) ? `claude.ai: ${r.sp.aliases.filter(a => a !== r.sp.name).join(', ')}` : '', r.sp.id.startsWith('cp_') ? 'chat Project' : ''].filter(Boolean)
+        return `- ${r.sp.name} · ${r.n} sessions${r.n ? ` (${Object.entries(r.by).map(([k, v]) => `${k} ${v}`).join(', ')}) · last ${fmtDate(r.last)}` : ''}${extra.length ? ` · ${extra.join(' · ')}` : ''}`
+      })
       return text(`${list.length} Claude Projects:\n${lines.join('\n')}\n(${unfiled} sessions not filed under any Project; list_projects with view="sessions" to see them)`)
     }
     let list = query ? index.resolveProjects(query) : [...projects.values()]
-    if (platform) list = list.filter(p => p.platform === platform)
+    list = platform ? list.filter(p => p.platform === platform) : list.filter(p => !p.kb)
     list = list.filter(nonEmpty).sort((a, b) => (b.last || '').localeCompare(a.last || ''))
     const total = list.length
     const lines = list.slice(0, limit).map(p => `- ${p.id} · ${fmtDate(p.last)} · ${index.projectLabel(p)} · D${p.counts.D} I${p.counts.I} K${p.counts.K} W${p.counts.W}`)
@@ -243,8 +302,10 @@ function buildServer(store, index) {
     annotations: { readOnlyHint: true }
   }, async ({ project, task }) => {
     const sps = index.resolveSpaces(project)
-    const matches = index.resolveProjects(project).slice(0, sps.length ? 40 : 12)
-    if (!matches.length) return text(`No project matched "${project}". Use list_projects or search_memory.`)
+    const all = index.resolveProjects(project)
+    const kbs = all.filter(p => p.kb)
+    const matches = all.filter(p => !p.kb).slice(0, sps.length ? 40 : 12)
+    if (!matches.length && !kbs.length) return text(`No project matched "${project}". Use list_projects or search_memory.`)
     const ids = new Set(matches.map(p => p.id))
     const { nodes } = index.load()
     const taskTerms = task ? queryTerms(task) : []
@@ -252,12 +313,13 @@ function buildServer(store, index) {
     const pick = (type, max, chars) => nodes.filter(n => n.type === type && ids.has(n.project_id))
       .sort((a, b) => (rel(b) - rel(a)) || (b.ts - a.ts)).slice(0, max)
       .map(n => `- (${n.id}, ${fmtDate(n.created_at)}) ${n.content.replace(/\s+/g, ' ').slice(0, chars)}`)
-    let out = `# Context: ${sps.length ? sps.map(sp => sp.name).join(', ') + ' (Claude Project)' : project}\nSessions (${matches.length}): ${matches.slice(0, 15).map(p => `${index.projectLabel(p)} [${p.id}]`).join('; ')}${matches.length > 15 ? ' …' : ''}\n`
+    let out = `# Context: ${sps.length ? sps.map(sp => sp.name).join(', ') + ' (Claude Project)' : project}\nSessions (${matches.length}): ${matches.length ? matches.slice(0, 15).map(p => `${index.projectLabel(p)} [${p.id}]`).join('; ') : 'none recorded'}${matches.length > 15 ? ' …' : ''}\n`
+    out += projectMaterial(nodes, kbs, rel, taskTerms.length > 0)
     const w = pick('W', 6, 500), k = pick('K', 10, 700), i = pick('I', 10, 400)
     if (w.length) out += `\n## Wisdom\n${w.join('\n')}\n`
     if (k.length) out += `\n## Knowledge\n${k.join('\n')}\n`
     if (i.length) out += `\n## Information\n${i.join('\n')}\n`
-    if (!w.length && !k.length && !i.length) {
+    if (!w.length && !k.length && !i.length && matches.length) {
       const d = nodes.filter(n => n.type === 'D' && ids.has(n.project_id)).sort((a, b) => b.ts - a.ts).slice(0, 12).reverse()
         .map(n => `- ${fmtDate(n.created_at)} ${n.content.replace(/\s+/g, ' ').slice(0, 400)}`)
       out += `\n(Nothing distilled yet; latest raw turns)\n${d.join('\n')}\n`
@@ -286,7 +348,7 @@ function buildServer(store, index) {
 
   server.registerTool('record_learning', {
     title: 'Record to memory',
-    description: 'Save a durable insight, decision, fact or how-to so every other tool can find it later. Write one self-contained paragraph (what, why, key specifics). Defaults to type K.',
+    description: 'Save a durable insight, decision, fact, how-to, or a session summary so every other tool can find it later. Write one self-contained paragraph (what, why, key specifics). Defaults to type K; use I for a summary of what a session did. In cloud sessions (claude.ai, Cowork) call this before finishing substantial work, because those transcripts are not captured otherwise.',
     inputSchema: {
       content: z.string().min(10),
       type: z.enum(['D', 'I', 'K', 'W']).optional().describe('K know-how (default), W principle/judgment, I fact/status, D raw note'),

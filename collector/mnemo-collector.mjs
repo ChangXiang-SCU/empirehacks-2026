@@ -233,6 +233,117 @@ async function syncSpaces(state) {
   log(`projects synced: ${r.spaces} Claude Projects${r.filed ? `, ${r.filed} sessions filed` : ''}`)
 }
 
+// Each Project's own material: <org>/.project-cache/<claude.ai uuid>/{metadata.json, docs/, files/} (claude.ai Project
+// description, instructions, knowledge files) and <org>/spaces/<id>/memory/*.md (Cowork project memory).
+// Sent one Project at a time when its files change; the server extracts PDF text and masks ID/account numbers.
+const TEXT_EXT = /\.(md|markdown|txt|csv|tsv|json|ya?ml|xml|html?|tex|bib|py|js|mjs|ts|tsx|jsx|sh|ps1|sql|r|ipynb|rst|org|log)$/i
+const MAX_FILE = (cfg.knowledgeMaxMB ?? 25) * 1048576
+function filesIn(dir) {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true, recursive: true }).filter(e => e.isFile())
+      .map(e => { const full = path.join(e.parentPath || e.path || dir, e.name); const st = fs.statSync(full); return { full, name: path.relative(dir, full).split(path.sep).join('/'), size: st.size, mtimeMs: st.mtimeMs } })
+  } catch { return [] }
+}
+function orgDirs() {
+  const out = []
+  for (const src of SOURCES) {
+    if (src.match !== KINDS.audit) continue
+    let accts = []; try { accts = fs.readdirSync(src.root) } catch { continue }
+    for (const a of accts) {
+      let orgs = []; try { orgs = fs.readdirSync(path.join(src.root, a)) } catch { continue }
+      for (const o of orgs) if (fs.existsSync(path.join(src.root, a, o, 'spaces.json')) || fs.existsSync(path.join(src.root, a, o, '.project-cache'))) out.push(path.join(src.root, a, o))
+    }
+  }
+  return out
+}
+async function syncKnowledge(state) {
+  if (cfg.projectKnowledge === false) return
+  const crypto = await import('node:crypto')
+  state.knowledge ||= {}
+  const items = []
+  for (const org of orgDirs()) {
+    const cache = path.join(org, '.project-cache')
+    let ids = []; try { ids = fs.readdirSync(cache) } catch {}
+    for (const uuid of ids) {
+      const dir = path.join(cache, uuid)
+      let meta; try { meta = JSON.parse(fs.readFileSync(path.join(dir, 'metadata.json'), 'utf-8')) } catch { continue }
+      const docs = filesIn(path.join(dir, 'docs')), files = filesIn(path.join(dir, 'files'))
+      const sig = JSON.stringify([meta, docs.map(f => [f.name, f.size, f.mtimeMs]), files.map(f => [f.name, f.size, f.mtimeMs])])
+      items.push({ key: 'project:' + uuid, label: meta.name || uuid, sig, build: () => ({
+        kind: 'project', uuid: meta.uuid || uuid, name: meta.name || uuid, description: meta.description || '', instructions: meta.prompt_template || '', syncedAt: meta.synced_at || null,
+        docs: docs.filter(f => f.size <= MAX_FILE).map(f => ({ name: f.name, mtime: new Date(f.mtimeMs).toISOString(), text: fs.readFileSync(f.full, 'utf-8') })),
+        files: files.map(f => ({ name: f.name, size: f.size, mtime: new Date(f.mtimeMs).toISOString(),
+          ...(/\.pdf$/i.test(f.name) && f.size <= MAX_FILE ? { b64: fs.readFileSync(f.full).toString('base64') } : TEXT_EXT.test(f.name) && f.size <= MAX_FILE ? { text: fs.readFileSync(f.full, 'utf-8') } : {}) }))
+      }) })
+    }
+    let spaces = []; try { spaces = fs.readdirSync(path.join(org, 'spaces')) } catch {}
+    for (const sid of spaces) {
+      const mem = filesIn(path.join(org, 'spaces', sid, 'memory')).filter(f => TEXT_EXT.test(f.name) && f.size <= MAX_FILE)
+      if (!mem.length && !state.knowledge['memory:' + sid]) continue
+      const sig = JSON.stringify(mem.map(f => [f.name, f.size, f.mtimeMs]))
+      items.push({ key: 'memory:' + sid, label: sid, sig, build: () => ({
+        kind: 'memory', spaceId: sid, files: mem.map(f => ({ name: f.name, mtime: new Date(f.mtimeMs).toISOString(), text: fs.readFileSync(f.full, 'utf-8') }))
+      }) })
+    }
+  }
+  let sent = 0
+  for (const it of items) {
+    const hash = crypto.createHash('sha1').update(it.sig).digest('hex')
+    if (state.knowledge[it.key] === hash) continue
+    if (args.has('--dry')) { log(`dry knowledge ${it.key} (${it.label})`); continue }
+    const body = zlib.gzipSync(Buffer.from(JSON.stringify(it.build()), 'utf-8'))
+    const post = () => fetch(`${ENDPOINT}/api/knowledge`, { method: 'POST', body, headers: { 'content-type': 'application/gzip' }, signal: AbortSignal.timeout(300000) })
+    let res
+    try { res = await post() } catch { await new Promise(r => setTimeout(r, 3000)); res = await post() }  // one retry on a dropped connection
+    const text = await res.text()
+    if (!res.ok) throw new Error(`knowledge ${it.label}: HTTP ${res.status} ${text.slice(0, 200)}`)
+    const r = JSON.parse(text)
+    state.knowledge[it.key] = hash
+    saveState(state)
+    sent++
+    if (!r.skipped) log(`↑ project ${it.key.startsWith('memory:') ? 'memory' : 'knowledge'} ${r.name || it.label} → ${r.nodes} entries`)
+  }
+  if (sent) log(`project material synced: ${sent} Projects`)
+}
+
+// Claude desktop keeps one metadata file per session: <org>/local_<id>.json (Cowork: app title and the Project, spaceId,
+// the session was started in) and claude-code-sessions/<account>/<org>/local_<id>.json (Claude Code in the app: title,
+// cliSessionId = transcript id). Send what changed so the server files sessions and names them the way the app does.
+async function syncSessionMeta(state) {
+  state.sessionMeta ||= {}
+  const out = []
+  const seen = new Set()
+  for (const org of orgDirs()) {
+    const ccDir = path.join(org, '..', '..', '..', 'claude-code-sessions', path.basename(path.dirname(org)), path.basename(org))
+    for (const [dir, kind] of [[org, 'cowork'], [ccDir, 'code']]) {
+      let names = []; try { names = fs.readdirSync(dir).filter(f => /^local_.*\.json$/.test(f)) } catch { continue }
+      for (const f of names) {
+        const full = path.join(dir, f)
+        seen.add(full)
+        let st; try { st = fs.statSync(full) } catch { continue }
+        if (state.sessionMeta[full] === st.mtimeMs) continue
+        let o; try { o = JSON.parse(fs.readFileSync(full, 'utf-8')) } catch { continue }
+        const entry = kind === 'cowork'
+          ? { sid: o.sessionId || f.replace(/\.json$/, ''), spaceId: o.spaceId || null, appSpace: !!o.spaceId, title: o.title || null, archived: !!o.isArchived }
+          : { sid: o.cliSessionId, appSpace: false, title: o.title || null, archived: !!o.isArchived }
+        if (entry.sid) out.push({ entry, full, mtimeMs: st.mtimeMs })
+      }
+    }
+  }
+  if (!out.length || args.has('--dry')) { if (out.length) log(`dry session metadata: ${out.length} changed`); return }
+  let filed = 0, renamed = 0
+  for (let i = 0; i < out.length; i += 300) {
+    const batch = out.slice(i, i + 300)
+    const res = await fetch(`${ENDPOINT}/api/sessions-meta`, { method: 'POST', body: zlib.gzipSync(Buffer.from(JSON.stringify({ sessions: batch.map(b => b.entry) }), 'utf-8')), headers: { 'content-type': 'application/gzip' }, signal: AbortSignal.timeout(120000) })
+    if (!res.ok) throw new Error(`sessions-meta HTTP ${res.status}`)
+    const r = await res.json()
+    filed += r.filed || 0; renamed += r.renamed || 0
+    for (const b of batch) state.sessionMeta[b.full] = b.mtimeMs
+    saveState(state)
+  }
+  log(`session metadata synced: ${out.length} sessions${filed ? `, ${filed} filed under their Project` : ''}${renamed ? `, ${renamed} renamed to the app title` : ''}`)
+}
+
 let busy = false
 async function scan() {
   if (busy) return
@@ -241,6 +352,8 @@ async function scan() {
   let uploaded = 0, failed = 0
   try {
     try { await syncSpaces(state) } catch (e) { log(`✗ projects sync: ${e.message}`) }
+    try { await syncKnowledge(state) } catch (e) { log(`✗ project material: ${e.message}`) }
+    try { await syncSessionMeta(state) } catch (e) { log(`✗ session metadata: ${e.message}`) }
     for (const src of SOURCES) {
       for (const file of walk(src.root, src.match)) {
         let st
