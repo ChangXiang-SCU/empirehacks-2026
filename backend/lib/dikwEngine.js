@@ -4,7 +4,8 @@ import { v4 as uuidv4 } from 'uuid'
 // Two providers:
 //   anthropic  Claude via the native Messages API (MNEMO_LLM_PROVIDER=anthropic, or a claude-* model, or ANTHROPIC_API_KEY)
 //   openai     any OpenAI-compatible /chat/completions endpoint (OpenAI, a local llama.cpp / vLLM server, ...)
-// Settings: MNEMO_LLM_PROVIDER, MNEMO_LLM_MODEL, MNEMO_LLM_API_KEY, MNEMO_LLM_BASE_URL, MNEMO_LLM_MAX_TOKENS, MNEMO_LLM_THINKING.
+// Settings: MNEMO_LLM_PROVIDER, MNEMO_LLM_MODEL, MNEMO_LLM_API_KEY, MNEMO_LLM_BASE_URL, MNEMO_LLM_MAX_TOKENS, MNEMO_LLM_THINKING,
+// MNEMO_LLM_WORKSPACE_ID (Claude personal or service-account keys that are not scoped to one workspace need it).
 const ENV = process.env
 const LLM_KEY = ENV.MNEMO_LLM_API_KEY || ENV.ANTHROPIC_API_KEY || ENV.OPENAI_API_KEY || ''
 const PROVIDER = ENV.MNEMO_LLM_PROVIDER
@@ -15,6 +16,8 @@ const MAX_OUT = Number(ENV.MNEMO_LLM_MAX_TOKENS || (PROVIDER === 'anthropic' ? 8
 // Distillation needs no up-front reasoning. Haiku 5.5 accepts thinking "disabled"; Sonnet 5.5 rejects it and takes
 // "between_tools" (no thinking before the answer when there are no tools). "default" sends nothing.
 const THINKING = ENV.MNEMO_LLM_THINKING || (/haiku/i.test(MODEL) ? 'disabled' : /sonnet-5/i.test(MODEL) ? 'between_tools' : 'default')
+
+const WORKSPACE = ENV.MNEMO_LLM_WORKSPACE_ID || ENV.ANTHROPIC_WORKSPACE_ID || ''
 
 export function llmConfigured() { return !!LLM_KEY }
 export function llmDescription() { return `${PROVIDER}:${MODEL}` }
@@ -40,7 +43,7 @@ export async function callLLM(systemPrompt, userPrompt) {
     if (PROVIDER === 'anthropic') {
       const res = await fetch(BASE_URL + '/v1/messages', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-api-key': LLM_KEY, 'anthropic-version': '2023-06-01' },
+        headers: { 'content-type': 'application/json', 'authorization': `Bearer ${LLM_KEY}`, 'anthropic-version': '2023-06-01', ...(WORKSPACE ? { 'anthropic-workspace-id': WORKSPACE } : {}) },
         body: JSON.stringify({
           model: MODEL,
           max_tokens: MAX_OUT,
