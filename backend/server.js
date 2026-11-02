@@ -34,7 +34,9 @@ import {
   callLLM,
   transformDtoI_upsert,
   transformItoK_upsert,
-  transformKtoW_upsert
+  transformKtoW_upsert,
+  llmConfigured,
+  llmDescription
 } from './lib/dikwEngine.js'
 import { recommendForProject, recommendOnImport } from './lib/recommendEngine.js'
 import { startFileWatcher } from './lib/fileWatcher.js'
@@ -2102,7 +2104,7 @@ async function ingestSession({ platform, content, filePath = '', fileSize = 0, f
   broadcastToClients({ type: 'graph:updated', data: getGraph() })
   console.log(`📦 ${platform}: ${parsed.nodes.length} D nodes → "${parsed.title}" (${projectId})`)
   // Scheduled-task runs repeat the same prompt; keep their reports searchable but don't spend LLM calls on them
-  const distill = dikw && parsed.nodes.length >= 4 && !parsed.title.startsWith('定时任务') && !!(process.env.MNEMO_LLM_API_KEY || process.env.OPENAI_API_KEY)
+  const distill = dikw && parsed.nodes.length >= 4 && !parsed.title.startsWith('定时任务') && llmConfigured()
   if (distill) scheduleDIKW(projectId, parsed.title)
   const space = spaceId ? dbGet('SELECT name FROM spaces WHERE id = ?', [spaceId])?.name : null
   return { projectId, title: parsed.title, workspace, space, nodes: parsed.nodes.length, dikw: distill }
@@ -2128,9 +2130,10 @@ initializeDatabase().then(async () => {
     })
   } else listenOn(server, null)
   console.log(`✓ MCP: ${MNEMO_SECRET ? 'POST /<secret>/mcp (remote)' : 'remote disabled (no MNEMO_SECRET)'}; legacy JSON at POST /api/mcp`)
+  console.log(`✓ Distillation: ${llmConfigured() ? llmDescription() : 'off (no LLM API key)'}`)
 
   // Catch up distillation that a restart interrupted (recent ingests never distilled since)
-  if (process.env.MNEMO_LLM_API_KEY || process.env.OPENAI_API_KEY) {
+  if (llmConfigured()) {
     const since = new Date(Date.now() - 14 * 86400000).toISOString()
     const pending = dbAll(`SELECT p.id, p.name FROM projects p WHERE p.last_ingest IS NOT NULL AND (p.last_dikw IS NULL OR p.last_dikw < p.last_ingest)
       AND (SELECT MAX(created_at) FROM nodes n WHERE n.project_id = p.id AND n.type = 'D') >= ?

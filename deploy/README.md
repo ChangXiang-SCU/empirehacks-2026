@@ -22,7 +22,7 @@ Mnemosyne runs as one small service on a Linux server and is used by every AI to
   Codex rollouts and Codex's SQLite store (`~/.codex/state_N.sqlite` + `thread_history_N.sqlite`, rebuilt per thread as rollout JSONL,
   keyed `codex-sqlite:<id>`; the server never lets these shrink a stored session). A transcript is uploaded (gzip, tool output stripped)
   once it has been idle 10 minutes. The server replaces that session's raw turns; sessions active in the last 14 days are distilled
-  (D→I→K→W) a few minutes later. Scheduled-task runs are stored but not distilled.
+  (D→I→K→W) a few minutes later by an LLM (Claude or any OpenAI-compatible model, see Ops). Scheduled-task runs are stored but not distilled.
 - **UI**: bind the Mind Palace to a private interface only (e.g. a Tailscale address via `BIND_HOSTS`).
 
 ## Claude Projects
@@ -81,4 +81,4 @@ it under the source's `platform`. `--once --dry` previews what would be uploaded
 | status / logs | `systemctl status mnemosyne` · `journalctl -u mnemosyne -f` |
 | upgrade | rebuild the bundle, copy it over, `bash deploy.sh` |
 | backup DB | `sudo cp /var/lib/mnemosyne/mnemosyne.db ~/mnemosyne-$(date +%F).db` |
-| switch LLM | add `MNEMO_LLM_BASE_URL`, `MNEMO_LLM_MODEL`, `MNEMO_LLM_API_KEY` to `/etc/mnemosyne/env` (any OpenAI-compatible server) |
+| switch LLM | Claude: add `ANTHROPIC_API_KEY` (and optionally `MNEMO_LLM_MODEL`, default `claude-haiku-5-5`) to `/etc/mnemosyne/env`; it uses the native Messages API. Anything OpenAI-compatible (OpenAI, a local llama.cpp / vLLM server): `MNEMO_LLM_PROVIDER=openai`, `MNEMO_LLM_BASE_URL`, `MNEMO_LLM_MODEL`, `MNEMO_LLM_API_KEY`. The service log prints the provider in use at startup. |
