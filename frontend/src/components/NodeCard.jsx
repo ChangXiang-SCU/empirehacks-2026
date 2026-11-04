@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { getLabelByType, getColorByType } from '../utils/dikwColors'
 import './NodeCard.css'
 
-const API_BASE = 'http://localhost:3001'
+const API_BASE = ''  // same origin; vite dev proxies /api to the backend
 
 export default function NodeCard({ node, isPreview = false }) {
   const typeLabel = getLabelByType(node.type)

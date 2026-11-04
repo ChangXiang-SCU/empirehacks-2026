@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import './SharePanel.css'
 
-const API_BASE = 'http://localhost:3001'
+const API_BASE = ''  // same origin; vite dev proxies /api to the backend
 
 export default function SharePanel({ onClose }) {
   const [rules, setRules] = useState([])
