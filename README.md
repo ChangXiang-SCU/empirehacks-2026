@@ -164,15 +164,12 @@ All nodes and connections are visualized in a real-time D3.js force-directed gra
 
 ### 4. MCP Feedback
 
-The MCP server exposes three resources to any connected AI client:
+Two MCP servers feed the accumulated knowledge back into your AI tools:
 
-```
-mnemosyne://knowledge-nodes    → All Knowledge-level insights
-mnemosyne://wisdom-nodes       → All Wisdom-level insights  
-mnemosyne://graph-summary       → Full graph overview
-```
-
-When Claude Desktop connects, it can access your accumulated knowledge as live context.
+- **Remote (v2, recommended)**: Streamable HTTP at `<public url>/<secret>/mcp`, shared by claude.ai, Claude Code, Codex and bots.
+  Tools: `search_memory`, `recent_activity`, `list_projects`, `get_project_context`, `get_node`, `record_learning`, `export_skill`.
+- **Local stdio (v1)**: `backend/mcp-stdio-server.mjs` forwards to the local backend's `POST /api/mcp`.
+  Tools: `query_knowledge`, `get_skill`, `record_learning`, `get_project_context`, `suggest_skills`, `export_knowledge`, `search_knowledge`.
 
 ---
 
@@ -209,6 +206,14 @@ npm run frontend
 
 Open **http://localhost:5173** — you'll see the Mnemosyne knowledge graph.
 
+### Tests
+
+```bash
+cd backend && npm test
+```
+
+`node --test`, no extra dependencies. Integration tests start a real `server.js` with a throwaway HOME and database.
+
 ### Production Build
 
 ```bash
@@ -232,7 +237,7 @@ Add to your Claude Desktop config (`claude_desktop_config.json`):
 }
 ```
 
-Restart Claude Desktop — you'll see "Add from mnemosyne" in the + menu.
+Restart Claude Desktop; the Mnemosyne tools appear in the tools menu. The backend must be running on port 3001.
 
 ### Remote deployment (v2)
 
@@ -292,7 +297,7 @@ mnemosyne/
 | `GET` | `/api/graph` | Fetch full DIKW graph (nodes + connections) |
 | `GET` | `/api/nodes?type=K` | Filter nodes by DIKW type |
 | `POST` | `/api/import` | Upload ChatGPT/Claude export (multipart) |
-| `POST` | `/api/dikw/transform` | Trigger DIKW pipeline on Data nodes |
+| `POST` | `/api/transform` | Transform selected nodes one DIKW level up |
 | `POST` | `/api/hook/tool-use` | Claude Code hook endpoint |
 | `GET` | `/api/platform/skills` | List skills from Claude Code & Codex |
 | `GET` | `/api/platform/mcps` | List MCP servers from both platforms |
@@ -304,16 +309,15 @@ mnemosyne/
 |-------|-----------|-------------|
 | `node:added` | Server → Client | New DIKW node created |
 | `connection:added` | Server → Client | New edge in graph |
-| `dikw:transform:complete` | Server → Client | Pipeline finished |
-| `filewatcher:new-session` | Server → Client | New session detected |
+| `graph:updated` | Server → Client | Full graph after an ingest or a DIKW run |
+| `import:completed` | Server → Client | Full graph after a file import |
+| `nodes:updated` | Server → Client | Nodes were moved to another project |
 
-### MCP Resources
+The socket only accepts pages served by the backend itself or the vite dev server (`MNEMO_CORS_ORIGINS` allows more).
 
-| URI | Description |
-|-----|-------------|
-| `mnemosyne://knowledge-nodes` | All Knowledge-level nodes |
-| `mnemosyne://wisdom-nodes` | All Wisdom-level nodes |
-| `mnemosyne://graph-summary` | Aggregated graph overview |
+### MCP Tools
+
+See [MCP Feedback](#4-mcp-feedback) above and [`deploy/README.md`](deploy/README.md) for the remote server.
 
 ---
 
