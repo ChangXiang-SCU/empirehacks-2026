@@ -40,7 +40,8 @@ export function createMemoryIndex(store) {
     const nodes = store.dbAll('SELECT id, type, project_id, source_platform, content, tags, created_at, updated_at FROM nodes')
     for (const n of nodes) {
       n.low = (n.content || '').toLowerCase()
-      n.ts = Date.parse(n.updated_at || n.created_at) || 0
+      // Raw turns date from when they were said; updated_at is only the last upload of the session
+      n.ts = Date.parse(n.type === 'D' ? n.created_at : (n.updated_at || n.created_at)) || 0
       let p = projects.get(n.project_id)
       if (!p) { p = { id: n.project_id, name: n.project_id, counts: { D: 0, I: 0, K: 0, W: 0 }, last: '' }; projects.set(n.project_id, p) }
       p.counts[n.type] = (p.counts[n.type] || 0) + 1
@@ -82,7 +83,8 @@ export function createMemoryIndex(store) {
     const all = [...spaces.values()]
     const names = sp => [sp.name, ...(sp.aliases || [])].map(x => x.toLowerCase())
     const exact = all.filter(sp => names(sp).includes(low) || sp.id === q || sp.uuids.includes(q))
-    return exact.length ? exact : all.filter(sp => names(sp).some(nm => nm.includes(low) || (low.length >= 4 && low.includes(nm))))
+    // "AI" must not match every query that happens to contain "ai" (email, detail, …)
+    return exact.length ? exact : all.filter(sp => names(sp).some(nm => nm.includes(low) || (low.length >= 4 && nm.length >= 4 && low.includes(nm))))
   }
 
   function resolveProjects(q) {
@@ -91,8 +93,20 @@ export function createMemoryIndex(store) {
     if (projects.has(q)) return [projects.get(q)]
     const low = q.toLowerCase()
     const spaceIds = new Set(resolveSpaces(q).map(sp => sp.id))
+    // ids are mostly uuids: a short query like "db" or "2026" would match them by chance
+    const idHit = (p) => low.length >= 8 && p.id.toLowerCase().includes(low)
     return [...projects.values()]
-      .filter(p => spaceIds.has(p.space_id) || p.id.toLowerCase().includes(low) || (p.name || '').toLowerCase().includes(low) || (p.workspace || '').toLowerCase() === low || (p.workspace || '').toLowerCase().includes(low))
+      .filter(p => spaceIds.has(p.space_id) || idHit(p) || (p.name || '').toLowerCase().includes(low) || (p.workspace || '').toLowerCase().includes(low))
+      .sort((a, b) => (b.last || '').localeCompare(a.last || ''))
+  }
+
+  /** Sessions whose id, title or workspace folder is exactly q (any case). For writes, where a fuzzy hit misfiles the note. */
+  function exactProjects(q) {
+    const { projects } = load()
+    const low = (q || '').toLowerCase().trim()
+    if (!low) return []
+    return [...projects.values()]
+      .filter(p => p.id.toLowerCase() === low || (p.name || '').toLowerCase().trim() === low || (p.workspace || '').toLowerCase() === low)
       .sort((a, b) => (b.last || '').localeCompare(a.last || ''))
   }
 
@@ -148,7 +162,7 @@ export function createMemoryIndex(store) {
     return { terms, results: results.map(({ n, score }) => ({ node: n, project: projects.get(n.project_id), score })), total: scored.length }
   }
 
-  return { load, search, resolveProjects, resolveSpaces, projectLabel }
+  return { load, search, resolveProjects, resolveSpaces, exactProjects, projectLabel }
 }
 
 const text = (t) => ({ content: [{ type: 'text', text: t }] })
@@ -360,7 +374,7 @@ function buildServer(store, index) {
     const now = new Date().toISOString()
     let projectId
     const sps = project ? index.resolveSpaces(project) : []
-    const found = project && !sps.length ? index.resolveProjects(project) : []
+    const found = project && !sps.length ? index.exactProjects(project) : []
     if (sps.length) {
       const sp = sps[0]
       projectId = 'notes_space_' + sp.id
