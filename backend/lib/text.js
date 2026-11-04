@@ -51,7 +51,9 @@ export function workspaceFromCwd(cwd) {
   }
   const last = parts[parts.length - 1]
   if (/^[A-Za-z]:$/.test(last) || ['Users', 'home', 'root', 'outputs', 'uploads', 'uploads-tmp'].includes(last)) return null
-  if (parts.length === 3 && (parts[0] === 'Users' || parts[0] === 'home' || /^[A-Za-z]:$/.test(parts[0]))) return null
+  // The home folder itself (C:/Users/<me>, /Users/<me>, /home/<me>) is not a workspace; folders inside it are
+  const drive = /^[A-Za-z]:$/.test(parts[0]) ? 1 : 0
+  if (parts.length === drive + 2 && (parts[drive] === 'Users' || parts[drive] === 'home')) return null
   return last
 }
 
