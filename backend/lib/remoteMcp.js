@@ -164,7 +164,7 @@ function projectMaterial(nodes, kbs, rel, byTask) {
   const overview = mine.filter(n => n.type === 'I' && n.project_id.startsWith('kb_'))
   const instr = mine.filter(n => n.type === 'W' && n.project_id.startsWith('kb_'))
   const docs = mine.filter(n => n.type === 'K' && n.project_id.startsWith('kb_'))
-  const mem = mine.filter(n => n.project_id.startsWith('kbmem_'))
+  const mem = mine.filter(n => n.project_id.startsWith('kbmem_') || n.project_id.startsWith('kbnotes_'))
   if (overview.length || instr.length || docs.length) {
     out += `\n## Project knowledge (from the Claude Project)\n`
     for (const n of overview) out += one(n, 2000) + '\n'
@@ -181,7 +181,7 @@ function projectMaterial(nodes, kbs, rel, byTask) {
     const index = mem.find(n => tagFile(n) === 'MEMORY.md')
     const rest = mem.filter(n => n !== index && !/\(\d+\/\d+\)\]/.test((n.content || '').split('\n')[0]) || /\(1\/\d+\)\]/.test((n.content || '').split('\n')[0]))
     const chosen = (byTask ? [...mem].sort((a, b) => rel(b) - rel(a)) : rest).filter(n => n !== index).slice(0, 12)
-    out += `\n## Project memory (Cowork notes)\n${index ? one(index, 2500) + '\n' : ''}${chosen.map(n => `- (${n.id}) ${one(n, 450).replace(/\n+/g, ' ')}`).join('\n')}\n`
+    out += `\n## Project memory and notes\n${index ? one(index, 2500) + '\n' : ''}${chosen.map(n => `- (${n.id}) ${one(n, 450).replace(/\n+/g, ' ')}`).join('\n')}\n`
   }
   return out
 }
@@ -268,7 +268,7 @@ function buildServer(store, index) {
       for (const p of projects.values()) {
         if (p.kb) {
           const r = rows.get(p.space_id)
-          if (r) { if (p.id.startsWith('kbmem_')) r.mem += p.files.size; else r.docs += p.files.size }
+          if (r) { if (p.id.startsWith('kbmem_') || p.id.startsWith('kbnotes_')) r.mem += p.files.size; else r.docs += p.files.size }
           continue
         }
         if (!nonEmpty(p) || (platform && p.platform !== platform)) continue
