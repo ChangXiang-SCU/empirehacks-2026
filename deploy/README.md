@@ -53,6 +53,18 @@ Any other folder of Markdown or text notes (an agent's own notebook, a personal 
 add `"noteDirs": [{ "key": "my-notes", "name": "My notes", "path": "/path/to/notes", "project": "<Claude Project name, optional>" }]`
 to `collector.json`. Each folder is stored as `kbnotes_<key>` and re-sent whenever a file in it changes.
 
+## Exact records and expiry
+Fuzzy recall is the wrong tool for "what did we decide" or "what is still open". Entries can therefore carry a kind and a
+validity in their tags (`backend/lib/facts.js`), with no change to any tool definition:
+
+- `record_learning` with the tag `decision`, `todo` or `fact` saves an exact record; `expires:YYYY-MM-DD` gives it an end date.
+- A new entry tagged `supersedes:<id>` or `done:<id>` marks the old one. Nothing is deleted.
+- `get_project_context` lists open to-dos and decisions in force first. `search_memory` shows closed, replaced or expired
+  entries marked and ranks them lower; the bare query `todo` or `decisions` lists the records in force. Status facts older
+  than four months are shown with their age.
+- In an imported notes folder, top-level bullets under a heading such as `TODO` / `待办` or `Decisions` / `已定案` become
+  to-do and decision records that follow the file.
+
 ## Install
 
 Server (Ubuntu, Node 20+, Caddy with an existing HTTPS site block that ends in `handle { respond 404 }`):

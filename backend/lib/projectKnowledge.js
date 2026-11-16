@@ -5,9 +5,11 @@
 // Stored as one pseudo-session per Project ("kb_<uuid>" / "kbmem_<spaceId>", platform "claude-project"),
 // filed under the Project's space, so search_memory finds the content and get_project_context shows it first.
 import crypto from 'crypto'
+import { extractRecords } from './facts.js'
 
 export const KB_PLATFORM = 'claude-project'
 const CHUNK = 3500
+const FORMAT = 'v2:'               // bump when the stored form changes, so unchanged sources are stored again
 const MAX_TEXT = 150000            // per file
 const PDF_TIMEOUT_MS = 60000
 
@@ -61,7 +63,7 @@ const iso = (v, fallback) => {
  * it is ignored when the Project's material is already stored.
  */
 export async function ingestKnowledge(store, item) {
-  const hash = crypto.createHash('sha1').update(JSON.stringify(item)).digest('hex')
+  const hash = crypto.createHash('sha1').update(FORMAT + JSON.stringify(item)).digest('hex')
   const now = new Date().toISOString()
 
   let projectId, name, spaceId = null, nodes = []
@@ -156,6 +158,10 @@ export async function ingestKnowledge(store, item) {
     for (const f of [...(item.files || [])].sort((a, b) => a.name.localeCompare(b.name))) {
       const parts = chunkText(String(f.text || '').slice(0, MAX_TEXT))
       parts.forEach((p, i) => add('K', `[Notes · ${label} · ${f.name}${parts.length > 1 ? ` (${i + 1}/${parts.length})` : ''}]\n${p}`, ['notes-library', 'file:' + f.name], iso(f.mtime, now)))
+      // Bullets under a to-do or decisions heading become exact records; they follow the file, so a removed bullet disappears
+      for (const r of extractRecords(f.text)) {
+        add('I', `[${r.kind === 'todo' ? 'To-do' : 'Decision'} · ${label} · ${f.name}] ${r.text.slice(0, 700)}`, ['notes-library', 'file:' + f.name, r.kind, 'auto'], iso(f.mtime, now))
+      }
     }
   } else {
     const spName = name.replace(/^Project memory · /, '')
