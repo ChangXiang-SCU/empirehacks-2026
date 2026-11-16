@@ -49,6 +49,10 @@ list. `get_project_context` puts this material first; `recent_activity` leaves i
 opened in the app, so a Project used only on the web shows up after it has been opened once in Claude desktop.
 Set `"projectKnowledge": false` in `collector.json` to turn this off.
 
+Any other folder of Markdown or text notes (an agent's own notebook, a personal notes folder) can be imported the same way:
+add `"noteDirs": [{ "key": "my-notes", "name": "My notes", "path": "/path/to/notes", "project": "<Claude Project name, optional>" }]`
+to `collector.json`. Each folder is stored as `kbnotes_<key>` and re-sent whenever a file in it changes.
+
 ## Install
 
 Server (Ubuntu, Node 20+, Caddy with an existing HTTPS site block that ends in `handle { respond 404 }`):

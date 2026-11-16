@@ -56,6 +56,7 @@ const iso = (v, fallback) => {
  * store: { dbAll, dbGet, dbRun, save }
  * item:  { kind: 'project', uuid, name, description, instructions, syncedAt, docs: [{name, text, mtime}], files: [{name, size, mtime, b64?}] }
  *    or  { kind: 'memory', spaceId, files: [{name, text, mtime}] }
+ *    or  { kind: 'notes', key, name, project?, files: [{name, text, mtime}] }  a folder of notes kept by an agent or a person
  * A project item with stub: true (just uuid and name, e.g. from the claude.ai Projects page) only registers the Project;
  * it is ignored when the Project's material is already stored.
  */
@@ -63,7 +64,7 @@ export async function ingestKnowledge(store, item) {
   const hash = crypto.createHash('sha1').update(JSON.stringify(item)).digest('hex')
   const now = new Date().toISOString()
 
-  let projectId, name, spaceId, nodes = []
+  let projectId, name, spaceId = null, nodes = []
   if (item.kind === 'project') {
     if (!item.uuid || !item.name) throw new Error('uuid and name required')
     if (item.stub && store.dbGet('SELECT 1 AS x FROM nodes WHERE project_id = ? LIMIT 1', ['kb_' + item.uuid])) return { skipped: 'exists', projectId: 'kb_' + item.uuid }
@@ -88,6 +89,14 @@ export async function ingestKnowledge(store, item) {
     const spName = store.dbGet('SELECT name FROM spaces WHERE id = ?', [spaceId])?.name || spaceId
     projectId = 'kbmem_' + spaceId
     name = `Project memory · ${spName}`
+  } else if (item.kind === 'notes') {
+    if (!/^[\w.-]{1,80}$/.test(item.key || '')) throw new Error('key required (letters, digits, . _ -)')
+    if (item.project) {
+      const want = String(item.project).trim().toLowerCase()
+      spaceId = store.dbAll('SELECT id, name FROM spaces').find(sp => String(sp.name).trim().toLowerCase() === want)?.id || null
+    }
+    projectId = 'kbnotes_' + item.key
+    name = `Notes library · ${item.name || item.key}`
   } else throw new Error('unknown kind')
 
   const existing = store.dbGet('SELECT id, content_hash, space_id FROM projects WHERE id = ?', [projectId])
@@ -142,6 +151,12 @@ export async function ingestKnowledge(store, item) {
       const parts = chunkText(f.text)
       parts.forEach((p, i) => add('K', `[Project file · ${item.name} · ${f.label}${parts.length > 1 ? ` (${i + 1}/${parts.length})` : ''}]\n${p}`, ['project-knowledge', 'file:' + f.label], iso(f.mtime, created)))
     }
+  } else if (item.kind === 'notes') {
+    const label = name.replace(/^Notes library · /, '')
+    for (const f of [...(item.files || [])].sort((a, b) => a.name.localeCompare(b.name))) {
+      const parts = chunkText(String(f.text || '').slice(0, MAX_TEXT))
+      parts.forEach((p, i) => add('K', `[Notes · ${label} · ${f.name}${parts.length > 1 ? ` (${i + 1}/${parts.length})` : ''}]\n${p}`, ['notes-library', 'file:' + f.name], iso(f.mtime, now)))
+    }
   } else {
     const spName = name.replace(/^Project memory · /, '')
     const files = [...(item.files || [])].sort((a, b) => (a.name === 'MEMORY.md' ? -1 : b.name === 'MEMORY.md' ? 1 : a.name.localeCompare(b.name)))
@@ -160,15 +175,15 @@ export async function ingestKnowledge(store, item) {
     store.dbRun(`INSERT INTO projects (id, name, color, created_at, updated_at, platform, space_id, content_hash, last_ingest, space_checked)
       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`, [projectId, name, '#00897b', now, now, KB_PLATFORM, spaceId, now, now])
   }
-  const short = projectId.replace(/^kb(mem)?_/, '').replace(/-/g, '')  // full id: uuids created close together share long prefixes
+  const short = projectId.replace(/^kb(mem|notes)?_/, '').replace(/-/g, '')  // full id: uuids created close together share long prefixes
   nodes.forEach((n, i) => {
     store.dbRun(`INSERT INTO nodes (id, type, project_id, source_platform, content, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [`${projectId.startsWith('kbmem_') ? 'pmem' : 'pdoc'}_${short}_${i}`, n.type, projectId, KB_PLATFORM, n.content, JSON.stringify(n.tags), n.createdAt, now])
+      [`${projectId.startsWith('kbmem_') ? 'pmem' : projectId.startsWith('kbnotes_') ? 'pnote' : 'pdoc'}_${short}_${i}`, n.type, projectId, KB_PLATFORM, n.content, JSON.stringify(n.tags), n.createdAt, now])
   })
   // Only now mark the content as stored, so a failed write is retried on the next sync
   store.dbRun('UPDATE projects SET content_hash = ? WHERE id = ?', [hash, projectId])
   store.save()
-  return { projectId, spaceId, name: name.replace(/^Project (knowledge|memory) · /, ''), nodes: nodes.length }
+  return { projectId, spaceId, name: name.replace(/^(Project (knowledge|memory)|Notes library) · /, ''), nodes: nodes.length }
 }
 
 /** Fold a claude.ai Project's own space ("cp_<uuid>") into the Cowork space that now links that uuid. */
