@@ -47,7 +47,11 @@ const __dirname = dirname(__filename)
 const app = express()
 const server = createServer(app)
 const wss = new WebSocketServer({ noServer: true })
-const attachWs = (srv) => srv.on('upgrade', (req, sock, head) => wss.handleUpgrade(req, sock, head, ws => wss.emit('connection', ws, req)))
+const attachWs = (srv) => srv.on('upgrade', (req, sock, head) => {
+  // The socket streams the whole graph; only pages served by this server (or the vite dev server) may open it
+  if (!originAllowed(req.headers.origin, req.headers.host)) { sock.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return sock.destroy() }
+  wss.handleUpgrade(req, sock, head, ws => wss.emit('connection', ws, req))
+})
 attachWs(server)
 const upload = multer({ storage: multer.memoryStorage() })
 
@@ -59,7 +63,31 @@ const WATCH_LOCAL = process.env.MNEMO_WATCH ? process.env.MNEMO_WATCH === '1' : 
 const GRAPH_D_PROJECTS = Number(process.env.MNEMO_GRAPH_D_PROJECTS || 25)
 let dataVersion = 0
 
-// \u2500\u2500 Database helpers (sql.js) \u2500\u2500
+// ── Browser access ──
+// The UI is served by this server (or proxied by the vite dev server), so it needs no CORS. Other websites the user
+// visits must not be able to drive the local API (delete skills, write config files) or read the graph socket.
+// MNEMO_CORS_ORIGINS=https://a.example,https://b.example allows extra origins.
+const CORS_ORIGINS = new Set((process.env.MNEMO_CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean))
+const DEV_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):5173$/
+function originAllowed(origin, host) {
+  if (!origin) return true  // not a browser request (hooks, collector, MCP clients)
+  try { if (new URL(origin).host === host) return true } catch { return false }
+  return DEV_ORIGIN.test(origin) || CORS_ORIGINS.has(origin)
+}
+
+// ── Platform Hub paths ──
+// Skill / rules ids come from the URL or the request body and name one folder under a fixed base folder.
+const SAFE_ID = /^[\p{L}\p{N}_.\- ]{1,200}$/u
+/** base/id/...rest, or null when id is not a single plain folder name or the result would leave base. */
+function childPath(base, id, ...rest) {
+  if (typeof id !== 'string' || !SAFE_ID.test(id) || id === '.' || id === '..') return null
+  const root = path.resolve(base)
+  const p = path.resolve(root, id, ...rest)
+  return p.startsWith(root + path.sep) ? p : null
+}
+const homeDir = () => process.env.USERPROFILE || process.env.HOME
+
+// ── Database helpers (sql.js) ──
 let db = null
 
 function dbAll(sql, params = []) {
@@ -97,17 +125,17 @@ function saveDb() {
 }
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { try { if (db) flushDb() } catch {} process.exit(0) })
 
-// \u2500\u2500 Initialize \u2500\u2500
+// ── Initialize ──
 async function initializeDatabase() {
   const SQL = await initSqlJs()
 
   if (fs.existsSync(DB_PATH)) {
     const fileBuffer = fs.readFileSync(DB_PATH)
     db = new SQL.Database(fileBuffer)
-    console.log('\u2713 Loaded existing database')
+    console.log('✓ Loaded existing database')
   } else {
     db = new SQL.Database()
-    console.log('\u2713 Created new database')
+    console.log('✓ Created new database')
   }
 
   const schema = fs.readFileSync(join(__dirname, 'db/schema.sql'), 'utf-8')
@@ -163,7 +191,7 @@ function seedDatabase() {
       )
     })
 
-    console.log('\u2713 Database seeded with demo data')
+    console.log('✓ Database seeded with demo data')
   } catch (error) {
     console.error('Error seeding database:', error)
   }
@@ -246,13 +274,20 @@ function insertConnectionToDb(conn) {
   )
 }
 
-// \u2500\u2500 Routes \u2500\u2500
+// ── Routes ──
 app.use(express.json())
 app.use(express.static(join(__dirname, '../frontend/dist')))
 
-// CORS
+// CORS: only for the allowed origins above; cross-site requests that change state are refused outright
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*')
+  const origin = req.get('origin')
+  if (!origin || (MNEMO_SECRET && req.path.startsWith('/' + MNEMO_SECRET + '/'))) return next()
+  if (!originAllowed(origin, req.get('host'))) {
+    if (['GET', 'HEAD'].includes(req.method)) return next()  // the browser will not hand the response to the page
+    return res.status(403).json({ error: 'cross-origin request refused' })
+  }
+  res.header('Access-Control-Allow-Origin', origin)
+  res.header('Vary', 'Origin')
   res.header('Access-Control-Allow-Headers', 'Content-Type')
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE')
   next()
@@ -349,7 +384,7 @@ if (MNEMO_SECRET) {
   app.all(base + '/*', (req, res) => res.status(404).json({ error: 'not found' }))
 }
 
-// \u2500\u2500 GET /api/graph \u2500\u2500
+// ── GET /api/graph ──
 app.get('/api/graph', (req, res) => {
   try {
     res.json(getGraph())
@@ -359,7 +394,7 @@ app.get('/api/graph', (req, res) => {
   }
 })
 
-// \u2500\u2500 POST /api/import \u2014 Import file + auto-transform \u2500\u2500
+// ── POST /api/import — Import file + auto-transform ──
 app.post('/api/import', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file provided' })
 
@@ -430,7 +465,7 @@ app.post('/api/import', upload.single('file'), async (req, res) => {
       insertNodeToDb(node)
     })
 
-    // Auto-transform: D \u2192 I \u2192 K \u2192 W
+    // Auto-transform: D → I → K → W
     const transformed = await autoTransformBatch(dataNodes, { id: projectId, name: projectName })
     transformed.nodes.forEach(node => {
       node.projectId = projectId
@@ -461,11 +496,11 @@ app.post('/api/import', upload.single('file'), async (req, res) => {
   }
 })
 
-// \u2500\u2500 POST /api/transform \u2014 Manual DIKW transformation \u2500\u2500
+// ── POST /api/transform — Manual DIKW transformation ──
 app.post('/api/transform', async (req, res) => {
   try {
     const { nodeIds, direction } = req.body
-    // direction: 'D\u2192I', 'I\u2192K', 'K\u2192W', or 'auto'
+    // direction: 'D→I', 'I→K', 'K→W', or 'auto'
 
     if (!nodeIds || !nodeIds.length) {
       return res.status(400).json({ error: 'No node IDs provided' })
@@ -496,11 +531,11 @@ app.post('/api/transform', async (req, res) => {
       else if (sourceType === 'I') result = await transformInfoToKnowledge(sourceNodes, projectContext)
       else if (sourceType === 'K') result = await transformKnowledgeToWisdom(sourceNodes, projectContext)
       else return res.status(400).json({ error: 'Wisdom nodes cannot be further transformed' })
-    } else if (direction === 'D\u2192I') {
+    } else if (direction === 'D→I') {
       result = await transformDataToInfo(sourceNodes.filter(n => n.type === 'D'), projectContext)
-    } else if (direction === 'I\u2192K') {
+    } else if (direction === 'I→K') {
       result = await transformInfoToKnowledge(sourceNodes.filter(n => n.type === 'I'), projectContext)
-    } else if (direction === 'K\u2192W') {
+    } else if (direction === 'K→W') {
       result = await transformKnowledgeToWisdom(sourceNodes.filter(n => n.type === 'K'), projectContext)
     }
 
@@ -820,7 +855,7 @@ ${kwSummary}`
   }
 })
 
-// \u2500\u2500 GET /api/recommend/:projectId \u2014 Cross-project knowledge recommendations \u2500\u2500
+// ── GET /api/recommend/:projectId — Cross-project knowledge recommendations ──
 app.get('/api/recommend/:projectId', (req, res) => {
   try {
     const { projectId } = req.params
@@ -833,7 +868,7 @@ app.get('/api/recommend/:projectId', (req, res) => {
   }
 })
 
-// \u2500\u2500 POST /api/classify \u2500\u2500
+// ── POST /api/classify ──
 app.post('/api/classify', (req, res) => {
   try {
     const { sessionId, projectId } = req.body
@@ -864,7 +899,7 @@ function formatToolContent(tool, input, output) {
       const fp = (input.file_path || '').replace(/\\/g, '/').split('/').slice(-2).join('/')
       const removed = input.old_string.trim().split('\n')[0].slice(0, 60)
       const added = input.new_string.trim().split('\n')[0].slice(0, 60)
-      parts.push(': ' + fp + ' | "' + removed + '" \u2192 "' + added + '"')
+      parts.push(': ' + fp + ' | "' + removed + '" → "' + added + '"')
     }
     // Write: show file + preview
     else if (input.content != null && input.file_path) {
@@ -915,11 +950,11 @@ function formatToolContent(tool, input, output) {
         parts.push(' (' + lines + ' lines)')
         if (lines <= 80) parts.push('\n' + o.slice(0, 2000))
       } else if (tool === 'Bash') {
-        parts.push('\n\u2192 ' + o.slice(0, 1000))
+        parts.push('\n→ ' + o.slice(0, 1000))
       } else if (o.length < 200) {
-        parts.push(' \u2192 ' + o)
+        parts.push(' → ' + o)
       } else {
-        parts.push(' \u2192 ' + o.slice(0, 500) + '...')
+        parts.push(' → ' + o.slice(0, 500) + '...')
       }
     }
   }
@@ -1122,7 +1157,7 @@ app.post('/api/aggregate', async (req, res) => {
   }
 })
 
-// \u2500\u2500 GET /api/nodes \u2014 Query nodes with filters \u2500\u2500
+// ── GET /api/nodes — Query nodes with filters ──
 app.get('/api/nodes', (req, res) => {
   try {
     const { type, project } = req.query
@@ -1233,7 +1268,7 @@ app.get('/api/recommendations/:projectId', (req, res) => {
   }
 })
 
-// \u2500\u2500 GET /api/stats \u2014 Dashboard stats \u2500\u2500
+// ── GET /api/stats — Dashboard stats ──
 app.get('/api/stats', (req, res) => {
   try {
     const totalNodes = dbGet('SELECT COUNT(*) as count FROM nodes')?.count || 0
@@ -1347,7 +1382,7 @@ Keep it concise and actionable for a coding agent.`
     res.status(500).json({ error: 'AGENTS.md export failed' })
   }
 })
-// \u2500\u2500 MCP Server endpoint (for external agents to query) \u2500\u2500
+// ── MCP Server endpoint (for external agents to query) ──
 app.post('/api/mcp', (req, res) => {
   try {
     const { method, params } = req.body
@@ -1697,9 +1732,9 @@ app.get('/api/platform/skills', (req, res) => {
 app.get('/api/platform/skills/:platform/:id/content', (req, res) => {
   try {
     const { platform, id } = req.params
-    const homeDir = process.env.USERPROFILE || process.env.HOME
     const base = platform === 'codex' ? '.codex' : '.claude'
-    const fp = path.join(homeDir, base, 'skills', id, 'SKILL.md')
+    const fp = childPath(path.join(homeDir(), base, 'skills'), id, 'SKILL.md')
+    if (!fp) return res.status(400).json({ error: 'Invalid skill id' })
     if (!fs.existsSync(fp)) return res.status(404).json({ error: 'Not found' })
     res.json({ content: fs.readFileSync(fp, 'utf-8'), path: fp })
   } catch (error) { res.status(500).json({ error: 'Read failed' }) }
@@ -1708,12 +1743,12 @@ app.get('/api/platform/skills/:platform/:id/content', (req, res) => {
 // -- POST /api/platform/skills/sync -- Sync a skill to the other platform --
 app.post('/api/platform/skills/sync', (req, res) => {
   try {
-    const { id, fromPlatform } = req.body
-    const homeDir = process.env.USERPROFILE || process.env.HOME
+    const { id, fromPlatform } = req.body || {}
     const fromBase = fromPlatform === 'codex' ? '.codex' : '.claude'
     const toBase = fromPlatform === 'codex' ? '.claude' : '.codex'
-    const srcDir = path.join(homeDir, fromBase, 'skills', id)
-    const destDir = path.join(homeDir, toBase, 'skills', id)
+    const srcDir = childPath(path.join(homeDir(), fromBase, 'skills'), id)
+    const destDir = childPath(path.join(homeDir(), toBase, 'skills'), id)
+    if (!srcDir || !destDir) return res.status(400).json({ error: 'Invalid skill id' })
     if (!fs.existsSync(srcDir)) return res.status(404).json({ error: 'Source skill not found' })
 
     // Recursively copy entire skill directory
@@ -1737,9 +1772,9 @@ app.post('/api/platform/skills/sync', (req, res) => {
 app.delete('/api/platform/skills/:platform/:id', (req, res) => {
   try {
     const { platform, id } = req.params
-    const homeDir = process.env.USERPROFILE || process.env.HOME
     const base = platform === 'codex' ? '.codex' : '.claude'
-    const dir = path.join(homeDir, base, 'skills', id)
+    const dir = childPath(path.join(homeDir(), base, 'skills'), id)
+    if (!dir) return res.status(400).json({ error: 'Invalid skill id' })
     if (!fs.existsSync(dir)) return res.status(404).json({ error: 'Not found' })
     fs.rmSync(dir, { recursive: true })
     console.log(`Removed skill "${id}" from ${platform}`)
@@ -1810,10 +1845,10 @@ app.get('/api/platform/rules', (req, res) => {
 app.get('/api/platform/rules/:platform/:id/content', (req, res) => {
   try {
     const { platform, id } = req.params
-    const homeDir = process.env.USERPROFILE || process.env.HOME
     const base = platform === 'codex' ? '.codex' : '.claude'
     const fname = platform === 'codex' ? 'AGENTS.md' : 'CLAUDE.md'
-    const fp = path.join(homeDir, base, 'projects', id, fname)
+    const fp = childPath(path.join(homeDir(), base, 'projects'), id, fname)
+    if (!fp) return res.status(400).json({ error: 'Invalid project id' })
     if (!fs.existsSync(fp)) return res.status(404).json({ error: 'Not found' })
     res.json({ content: fs.readFileSync(fp, 'utf-8'), path: fp })
   } catch (error) { res.status(500).json({ error: 'Read failed' }) }
@@ -1823,10 +1858,10 @@ app.get('/api/platform/rules/:platform/:id/content', (req, res) => {
 app.delete('/api/platform/rules/:platform/:id', (req, res) => {
   try {
     const { platform, id } = req.params
-    const homeDir = process.env.USERPROFILE || process.env.HOME
     const base = platform === 'codex' ? '.codex' : '.claude'
     const fname = platform === 'codex' ? 'AGENTS.md' : 'CLAUDE.md'
-    const fp = path.join(homeDir, base, 'projects', id, fname)
+    const fp = childPath(path.join(homeDir(), base, 'projects'), id, fname)
+    if (!fp) return res.status(400).json({ error: 'Invalid project id' })
     if (!fs.existsSync(fp)) return res.status(404).json({ error: 'Not found' })
     fs.unlinkSync(fp)
     console.log(`Removed ${fname} for "${id}" from ${platform}`)
@@ -1892,12 +1927,12 @@ app.get('/api/deployments', (req, res) => {
 app.get('/api/deployments/:type/:id/content', (req, res) => {
   try {
     const { type, id } = req.params
-    const homeDir = process.env.USERPROFILE || process.env.HOME
     let fp
-    if (type === 'skill') fp = path.join(homeDir, '.claude', 'skills', id, 'SKILL.md')
-    else if (type === 'rules') fp = path.join(homeDir, '.claude', 'projects', id, 'CLAUDE.md')
-    else if (type === 'agents') fp = path.join(homeDir, '.codex', 'projects', id, 'AGENTS.md')
+    if (type === 'skill') fp = childPath(path.join(homeDir(), '.claude', 'skills'), id, 'SKILL.md')
+    else if (type === 'rules') fp = childPath(path.join(homeDir(), '.claude', 'projects'), id, 'CLAUDE.md')
+    else if (type === 'agents') fp = childPath(path.join(homeDir(), '.codex', 'projects'), id, 'AGENTS.md')
     else return res.status(400).json({ error: 'Invalid type' })
+    if (!fp) return res.status(400).json({ error: 'Invalid id' })
     if (!fs.existsSync(fp)) return res.status(404).json({ error: 'Not found' })
     res.json({ content: fs.readFileSync(fp, 'utf-8'), path: fp })
   } catch (error) { res.status(500).json({ error: 'Failed to read deployment' }) }
@@ -1906,12 +1941,12 @@ app.get('/api/deployments/:type/:id/content', (req, res) => {
 app.delete('/api/deployments/:type/:id', (req, res) => {
   try {
     const { type, id } = req.params
-    const homeDir = process.env.USERPROFILE || process.env.HOME
     let fp
-    if (type === 'skill') fp = path.join(homeDir, '.claude', 'skills', id, 'SKILL.md')
-    else if (type === 'rules') fp = path.join(homeDir, '.claude', 'projects', id, 'CLAUDE.md')
-    else if (type === 'agents') fp = path.join(homeDir, '.codex', 'projects', id, 'AGENTS.md')
+    if (type === 'skill') fp = childPath(path.join(homeDir(), '.claude', 'skills'), id, 'SKILL.md')
+    else if (type === 'rules') fp = childPath(path.join(homeDir(), '.claude', 'projects'), id, 'CLAUDE.md')
+    else if (type === 'agents') fp = childPath(path.join(homeDir(), '.codex', 'projects'), id, 'AGENTS.md')
     else return res.status(400).json({ error: 'Invalid type' })
+    if (!fp) return res.status(400).json({ error: 'Invalid id' })
     if (!fs.existsSync(fp)) return res.status(404).json({ error: 'Not found' })
     fs.unlinkSync(fp)
     console.log('Removed deployment:', fp)
