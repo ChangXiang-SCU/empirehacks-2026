@@ -9,6 +9,7 @@ import { queryTerms, snippet, makeTitle } from './text.js'
 import { generateSkillMd } from './dikwEngine.js'
 import { KB_PLATFORM } from './projectKnowledge.js'
 import { factInfo, applyDirectives } from './facts.js'
+import { registerWechatTools, wechatEnabled, WECHAT_INSTRUCTIONS } from './wechatPush.js'
 
 const TYPE_WEIGHT = { W: 1.6, K: 1.5, I: 1.2, D: 0.6 }
 const TYPE_NAME = { D: 'Data', I: 'Information', K: 'Knowledge', W: 'Wisdom' }
@@ -223,7 +224,7 @@ function projectMaterial(nodes, kbs, rel, byTask) {
 function buildServer(store, index) {
   const server = new McpServer(
     { name: 'mnemosyne', title: 'Mnemosyne memory', version: '2.0.0' },
-    { instructions: INSTRUCTIONS }
+    { instructions: INSTRUCTIONS + (wechatEnabled() ? WECHAT_INSTRUCTIONS : '') }
   )
 
   server.registerTool('search_memory', {
@@ -442,6 +443,8 @@ function buildServer(store, index) {
     if (!n) return text(`No entry with id ${id}.`)
     return text(generateSkillMd({ id: n.id, content: n.content, tags: JSON.parse(n.tags || '[]') }, []))
   })
+
+  registerWechatTools(server)
 
   return server
 }
