@@ -24,6 +24,8 @@ Mnemosyne runs as one small service on a Linux server and is used by every AI to
   once it has been idle 10 minutes. The server replaces that session's raw turns; sessions active in the last 14 days are distilled
   (D→I→K→W) a few minutes later by an LLM (Claude or any OpenAI-compatible model, see Ops). Scheduled-task runs are stored but not distilled.
 - **UI**: bind the Mind Palace to a private interface only (e.g. a Tailscale address via `BIND_HOSTS`).
+  The local API answers only its own pages (and the vite dev server on port 5173): other origins get no CORS headers,
+  their POST/DELETE requests are refused and the graph WebSocket rejects them. `MNEMO_CORS_ORIGINS` (comma-separated) allows more.
 
 ## Claude Projects
 The collector also sends Claude desktop's Project list (`local-agent-mode-sessions/<account>/<org>/spaces.json`: name, claude.ai

@@ -4,7 +4,7 @@ import { useGraphStore } from '../stores/graphStore'
 import { getColorByType, getLabelByType } from '../utils/dikwColors'
 import './MindPalace.css'
 
-const API_BASE = 'http://localhost:3001'
+const API_BASE = ''  // same origin; vite dev proxies /api to the backend
 const TYPE_ICONS = { D: '📊', I: '📋', K: '💡', W: '🔮' }
 const NODE_WIDTH = 180
 const NODE_HEIGHT_EST = 90
