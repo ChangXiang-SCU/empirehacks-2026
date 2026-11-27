@@ -11,6 +11,12 @@ export function parseTags(tagsJson) {
   try { const t = JSON.parse(tagsJson || '[]'); return Array.isArray(t) ? t.map(String) : [] } catch { return [] }
 }
 
+/** When an "expires:" value stops being true, in ms: a bare date lasts to the end of that day (UTC). Infinity if unreadable. */
+export function expiryTime(expires) {
+  const end = Date.parse(expires.length <= 10 ? expires + 'T23:59:59Z' : expires)
+  return isNaN(end) ? Infinity : end
+}
+
 /** null for ordinary entries; otherwise { kind, status: 'active'|'done'|'superseded'|'expired', expires, by } */
 export function factInfo(tagsJson, now = Date.now()) {
   if (!tagsJson || !HINT.test(tagsJson)) return null
@@ -23,10 +29,7 @@ export function factInfo(tagsJson, now = Date.now()) {
     else if (l === 'status:done') status = 'done'
     else if (l === 'status:obsolete') status = 'superseded'
   }
-  if (status === 'active' && expires) {
-    const end = Date.parse(expires.length <= 10 ? expires + 'T23:59:59Z' : expires)
-    if (!isNaN(end) && end < now) status = 'expired'
-  }
+  if (status === 'active' && expires && expiryTime(expires) < now) status = 'expired'
   if (!kind && status === 'active' && !expires) return null
   return { kind, status, expires, by }
 }
