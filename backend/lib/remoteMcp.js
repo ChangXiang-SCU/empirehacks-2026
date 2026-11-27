@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { queryTerms, snippet, makeTitle } from './text.js'
 import { generateSkillMd } from './dikwEngine.js'
 import { KB_PLATFORM } from './projectKnowledge.js'
-import { factInfo, applyDirectives } from './facts.js'
+import { factInfo, applyDirectives, expiryTime } from './facts.js'
 
 const TYPE_WEIGHT = { W: 1.6, K: 1.5, I: 1.2, D: 0.6 }
 const TYPE_NAME = { D: 'Data', I: 'Information', K: 'Knowledge', W: 'Wisdom' }
@@ -32,7 +32,9 @@ export function createMemoryIndex(store) {
   let cache = null
   function load() {
     const v = store.version()
-    if (cache && cache.v === v) return cache
+    // A record's expiry is worked out when the index is built, so rebuild once the earliest one has passed,
+    // even if nothing was written in between
+    if (cache && cache.v === v && Date.now() < cache.nextExpiry) return cache
     const spaces = new Map()
     try { for (const sp of store.dbAll('SELECT * FROM spaces')) spaces.set(sp.id, { ...sp, uuids: JSON.parse(sp.project_uuids || '[]') }) } catch {}
     const projects = new Map()
@@ -40,11 +42,16 @@ export function createMemoryIndex(store) {
       projects.set(p.id, { ...p, spaceName: spaces.get(p.space_id)?.name || null, counts: { D: 0, I: 0, K: 0, W: 0 }, last: '' })
     }
     const nodes = store.dbAll('SELECT id, type, project_id, source_platform, content, tags, created_at, updated_at FROM nodes')
+    let nextExpiry = Infinity
     for (const n of nodes) {
       n.low = (n.content || '').toLowerCase()
       // Raw turns date from when they were said; updated_at is only the last upload of the session
       n.ts = Date.parse(n.type === 'D' ? n.created_at : (n.updated_at || n.created_at)) || 0
       n.fact = factInfo(n.tags)
+      if (n.fact?.status === 'active' && n.fact.expires) {
+        const end = expiryTime(n.fact.expires)
+        if (end < nextExpiry) nextExpiry = end
+      }
       let p = projects.get(n.project_id)
       if (!p) { p = { id: n.project_id, name: n.project_id, counts: { D: 0, I: 0, K: 0, W: 0 }, last: '' }; projects.set(n.project_id, p) }
       p.counts[n.type] = (p.counts[n.type] || 0) + 1
@@ -69,7 +76,7 @@ export function createMemoryIndex(store) {
       const f = (n.tags || '').match(/"file:([^"]+)"/)
       if (f) p.files.add(f[1])
     }
-    cache = { v, projects, nodes, spaces }
+    cache = { v, projects, nodes, spaces, nextExpiry }
     return cache
   }
 
