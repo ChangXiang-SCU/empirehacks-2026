@@ -49,6 +49,22 @@ list. `get_project_context` puts this material first; `recent_activity` leaves i
 opened in the app, so a Project used only on the web shows up after it has been opened once in Claude desktop.
 Set `"projectKnowledge": false` in `collector.json` to turn this off.
 
+Any other folder of Markdown or text notes (an agent's own notebook, a personal notes folder) can be imported the same way:
+add `"noteDirs": [{ "key": "my-notes", "name": "My notes", "path": "/path/to/notes", "project": "<Claude Project name, optional>" }]`
+to `collector.json`. Each folder is stored as `kbnotes_<key>` and re-sent whenever a file in it changes.
+
+## Exact records and expiry
+Fuzzy recall is the wrong tool for "what did we decide" or "what is still open". Entries can therefore carry a kind and a
+validity in their tags (`backend/lib/facts.js`), with no change to any tool definition:
+
+- `record_learning` with the tag `decision`, `todo` or `fact` saves an exact record; `expires:YYYY-MM-DD` gives it an end date.
+- A new entry tagged `supersedes:<id>` or `done:<id>` marks the old one. Nothing is deleted.
+- `get_project_context` lists open to-dos and decisions in force first. `search_memory` shows closed, replaced or expired
+  entries marked and ranks them lower; the bare query `todo` or `decisions` lists the records in force. Status facts older
+  than four months are shown with their age.
+- In an imported notes folder, top-level bullets under a heading such as `TODO` / `待办` or `Decisions` / `已定案` become
+  to-do and decision records that follow the file.
+
 ## Install
 
 Server (Ubuntu, Node 20+, Caddy with an existing HTTPS site block that ends in `handle { respond 404 }`):
@@ -81,4 +97,4 @@ it under the source's `platform`. `--once --dry` previews what would be uploaded
 | status / logs | `systemctl status mnemosyne` · `journalctl -u mnemosyne -f` |
 | upgrade | rebuild the bundle, copy it over, `bash deploy.sh` |
 | backup DB | `sudo cp /var/lib/mnemosyne/mnemosyne.db ~/mnemosyne-$(date +%F).db` |
-| switch LLM | Claude: add `ANTHROPIC_API_KEY` (and optionally `MNEMO_LLM_MODEL`, default `claude-haiku-5-5`) to `/etc/mnemosyne/env`; it uses the native Messages API. A personal or service-account key that is not scoped to one workspace also needs `MNEMO_LLM_WORKSPACE_ID=wrkspc_...` (Console → Settings → Workspaces). Anything OpenAI-compatible (OpenAI, a local llama.cpp / vLLM server): `MNEMO_LLM_PROVIDER=openai`, `MNEMO_LLM_BASE_URL`, `MNEMO_LLM_MODEL`, `MNEMO_LLM_API_KEY`. The service log prints the provider in use at startup. |
+| switch LLM | Claude: add `ANTHROPIC_API_KEY` (and optionally `MNEMO_LLM_MODEL`, default `claude-haiku-5-5`) to `/etc/mnemosyne/env`; it uses the native Messages API. A personal or service-account key that is not scoped to one workspace also needs `MNEMO_LLM_WORKSPACE_ID=wrkspc_...` (Console → Settings → Workspaces). Anything OpenAI-compatible (OpenAI, a local llama.cpp / vLLM server): `MNEMO_LLM_PROVIDER=openai`, `MNEMO_LLM_BASE_URL`, `MNEMO_LLM_MODEL`, `MNEMO_LLM_API_KEY`. Local model first, Claude when it is down: point the `MNEMO_LLM_*` settings at the local server and add `MNEMO_LLM_FALLBACK=anthropic` (after a failure the local model is retried every 5 minutes). The service log prints the chain in use at startup. |
