@@ -49,7 +49,7 @@ Open an issue describing:
 
 1. Create a feature branch: `git checkout -b feature/my-feature`
 2. Make your changes
-3. Test locally (both frontend and backend)
+3. Run `cd backend && npm test`, and try the change locally (both frontend and backend)
 4. Commit with clear messages
 5. Push and open a PR
 
