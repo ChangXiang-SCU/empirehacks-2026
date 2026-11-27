@@ -6,6 +6,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod'
 import { v4 as uuidv4 } from 'uuid'
 import { queryTerms, snippet, makeTitle } from './text.js'
+import { logQuery } from './queryLog.js'
 import { generateSkillMd } from './dikwEngine.js'
 import { KB_PLATFORM } from './projectKnowledge.js'
 import { factInfo, applyDirectives } from './facts.js'
@@ -220,7 +221,7 @@ function projectMaterial(nodes, kbs, rel, byTask) {
   return out
 }
 
-function buildServer(store, index) {
+function buildServer(store, index, ctx = {}) {
   const server = new McpServer(
     { name: 'mnemosyne', title: 'Mnemosyne memory', version: '2.0.0' },
     { instructions: INSTRUCTIONS }
@@ -239,6 +240,9 @@ function buildServer(store, index) {
     },
     annotations: { readOnlyHint: true }
   }, async (args) => {
+    const t0 = Date.now()
+    const log = (mode, shown, total) => logQuery({ tool: 'search_memory', mode, query: args.query, args: { type: args.type, project: args.project, platform: args.platform, days: args.days, limit: args.limit },
+      results: shown.map((n, i) => ({ id: n.id, type: n.type, rank: i + 1 })), total, ms: Date.now() - t0, client: ctx.client })
     // The bare query "todo" / "decisions" lists the exact records in force instead of ranking by keywords
     const q = (args.query || '').trim().toLowerCase()
     const listKind = /^(open )?(todos?|to-dos?|待办|待办事项)$/.test(q) ? 'todo' : /^(decisions?|决定|决策|已定案)$/.test(q) ? 'decision' : null
@@ -248,11 +252,13 @@ function buildServer(store, index) {
       const list = nodes.filter(n => n.fact?.kind === listKind && n.fact.status === 'active' && (!allowed || allowed.has(n.project_id))).sort((a, b) => b.ts - a.ts)
       if (list.length) {
         const shown = list.slice(0, args.limit || 20)
+        log('list:' + listKind, shown, list.length)
         return text(`${shown.length} of ${list.length} ${listKind === 'todo' ? 'open to-dos' : 'decisions in force'}${args.project ? ` for "${args.project}"` : ''}:\n` + shown.map(n =>
           `- ${n.id} · ${fmtDate(n.created_at)}${n.fact.expires ? ` · valid until ${n.fact.expires}` : ''} · ${index.projectLabel(projects.get(n.project_id)) || n.project_id}\n  ${(n.content || '').replace(/\s+/g, ' ').slice(0, 300)}`).join('\n'))
       }
     }
     const { terms, results, total } = index.search(args)
+    log('keyword', results.map(r => r.node), total || 0)
     if (!results.length) return text(`No memory matched "${args.query}". Try other keywords (synonyms, English/Chinese), or recent_activity.`)
     const lines = results.map(({ node: n, project: p }) =>
       `- [${n.type}] ${n.id} · ${fmtDate(n.created_at)}${standingMark(n, p)} · ${index.projectLabel(p) || n.project_id}\n  ${snippet(n.content, terms)}`)
@@ -352,7 +358,10 @@ function buildServer(store, index) {
     const all = index.resolveProjects(project)
     const kbs = all.filter(p => p.kb)
     const matches = all.filter(p => !p.kb).slice(0, sps.length ? 40 : 12)
-    if (!matches.length && !kbs.length) return text(`No project matched "${project}". Use list_projects or search_memory.`)
+    if (!matches.length && !kbs.length) {
+      logQuery({ tool: 'get_project_context', query: task || '', args: { project }, matched: 0, client: ctx.client })
+      return text(`No project matched "${project}". Use list_projects or search_memory.`)
+    }
     const ids = new Set(matches.map(p => p.id))
     const { nodes } = index.load()
     const taskTerms = task ? queryTerms(task) : []
@@ -372,6 +381,7 @@ function buildServer(store, index) {
         .map(n => `- ${fmtDate(n.created_at)} ${n.content.replace(/\s+/g, ' ').slice(0, 400)}`)
       out += `\n(Nothing distilled yet; latest raw turns)\n${d.join('\n')}\n`
     }
+    logQuery({ tool: 'get_project_context', query: task || '', args: { project }, matched: matches.length + kbs.length, shown: { W: w.length, K: k.length, I: i.length }, client: ctx.client })
     return text(out)
   })
 
@@ -383,6 +393,7 @@ function buildServer(store, index) {
   }, async ({ id }) => {
     const n = store.dbGet('SELECT * FROM nodes WHERE id = ?', [id])
     if (!n) return text(`No entry with id ${id}.`)
+    logQuery({ tool: 'get_node', id: n.id, type: n.type, client: ctx.client })
     const { projects } = index.load()
     const p = projects.get(n.project_id)
     const links = store.dbAll(
@@ -450,7 +461,7 @@ function buildServer(store, index) {
 export function createMcpHandler(store) {
   const index = createMemoryIndex(store)
   const handler = async (req, res) => {
-    const server = buildServer(store, index)
+    const server = buildServer(store, index, { client: String(req.headers?.['user-agent'] || '').slice(0, 80) })
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
     res.on('close', () => { transport.close(); server.close() })
     try {
