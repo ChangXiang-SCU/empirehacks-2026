@@ -286,6 +286,18 @@ async function syncKnowledge(state) {
       }) })
     }
   }
+  // Folders of notes kept outside any Claude app (an agent's notebook, a personal notes folder):
+  // "noteDirs": [{ "key": "wxbot-notes", "name": "...", "path": "/home/x/inbox/notes", "project": "<Claude Project name, optional>" }]
+  for (const nd of cfg.noteDirs || []) {
+    if (!nd.key || !nd.path) continue
+    const files = filesIn(nd.path).filter(f => /\.(md|markdown|txt)$/i.test(f.name) && f.size <= MAX_FILE)
+    if (!files.length && !state.knowledge['notes:' + nd.key]) continue
+    const sig = JSON.stringify([nd.name, nd.project, files.map(f => [f.name, f.size, f.mtimeMs])])
+    items.push({ key: 'notes:' + nd.key, label: nd.name || nd.key, sig, build: () => ({
+      kind: 'notes', key: nd.key, name: nd.name || nd.key, project: nd.project || null,
+      files: files.map(f => ({ name: f.name, mtime: new Date(f.mtimeMs).toISOString(), text: fs.readFileSync(f.full, 'utf-8') }))
+    }) })
+  }
   let sent = 0
   for (const it of items) {
     const hash = crypto.createHash('sha1').update(it.sig).digest('hex')
@@ -301,7 +313,7 @@ async function syncKnowledge(state) {
     state.knowledge[it.key] = hash
     saveState(state)
     sent++
-    if (!r.skipped) log(`↑ project ${it.key.startsWith('memory:') ? 'memory' : 'knowledge'} ${r.name || it.label} → ${r.nodes} entries`)
+    if (!r.skipped) log(`↑ project ${it.key.startsWith('memory:') ? 'memory' : it.key.startsWith('notes:') ? 'notes' : 'knowledge'} ${r.name || it.label} → ${r.nodes} entries`)
   }
   if (sent) log(`project material synced: ${sent} Projects`)
 }
