@@ -68,6 +68,12 @@ Interactive D3.js force-directed graph with color-coded DIKW nodes. Pan, zoom, c
 ### 🔌 MCP Feedback Loop
 Mnemosyne exposes an MCP server that feeds accumulated knowledge back into Claude Desktop, Claude Code, and any MCP-compatible client. Your AI assistant gains persistent memory.
 
+### 📌 Exact Records
+Fuzzy recall is the wrong tool for "what did we decide" or "what is still open". Tag an entry `decision`, `todo` or `fact` (optionally `expires:YYYY-MM-DD`) and it becomes an exact record; a later entry tagged `done:<id>` or `supersedes:<id>` closes or replaces it without deleting anything. `get_project_context` lists open to-dos and decisions in force first. See [Exact records and expiry](deploy/README.md#exact-records-and-expiry).
+
+### 📂 Notes Folders and Local Models
+The collector can also import any folder of Markdown or text notes (`noteDirs` in `collector.json`), re-sent whenever a file changes. Distillation can run on a local OpenAI-compatible model first and fall back to Claude when it is down (`MNEMO_LLM_FALLBACK=anthropic`). Both are described in [`deploy/README.md`](deploy/README.md).
+
 ### 🛠️ Platform Hub
 Sync skills, MCP servers, and configurations between Claude Code and Codex with one click. Right-click context menus for quick actions.
 
