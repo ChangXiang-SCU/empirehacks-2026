@@ -1,0 +1,30 @@
+{
+  "types": "fact | update | multi | howto | decision | record",
+  "questions": [
+    {
+      "id": "q001",
+      "query": "What port does the demo admin console listen on?",
+      "type": "fact",
+      "answer": "8443",
+      "nuggets": ["8443"],
+      "evidence": ["node_demo_d1"],
+      "asOf": "2026-06-01T00:00:00Z"
+    },
+    {
+      "id": "q002",
+      "query": "现在用哪个模型做提炼？",
+      "type": "update",
+      "answer": "beta 模型（之前是 alpha）",
+      "nuggets": ["beta"],
+      "evidence": ["info_demo_new"]
+    },
+    {
+      "id": "q003",
+      "query": "改配置之前应该注意什么？",
+      "type": "decision",
+      "answer": "先备份，再改。",
+      "nuggets": ["备份"],
+      "evidence": []
+    }
+  ]
+}

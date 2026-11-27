@@ -16,3 +16,9 @@ deploy/_ops/
 deploy/_old_startup/
 backend/db/*.db.tmp
 deploy/private/
+
+# retrieval evaluation: real questions, results, embedding cache and query logs are personal data
+backend/eval/e0/questions.json
+backend/eval/e0/results/
+backend/eval/e0/.cache/
+query-log.jsonl
