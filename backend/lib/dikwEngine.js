@@ -1,26 +1,48 @@
 import { v4 as uuidv4 } from 'uuid'
 
 // ── AI-Powered DIKW Transformation Engine ──
-// Two providers:
-//   anthropic  Claude via the native Messages API (MNEMO_LLM_PROVIDER=anthropic, or a claude-* model, or ANTHROPIC_API_KEY)
+// An LLM turns raw turns into Information / Knowledge / Wisdom. Two kinds of backend:
+//   anthropic  Claude via the native Messages API
 //   openai     any OpenAI-compatible /chat/completions endpoint (OpenAI, a local llama.cpp / vLLM server, ...)
-// Settings: MNEMO_LLM_PROVIDER, MNEMO_LLM_MODEL, MNEMO_LLM_API_KEY, MNEMO_LLM_BASE_URL, MNEMO_LLM_MAX_TOKENS, MNEMO_LLM_THINKING,
-// MNEMO_LLM_WORKSPACE_ID (Claude personal or service-account keys that are not scoped to one workspace need it).
+// Primary:  MNEMO_LLM_PROVIDER, MNEMO_LLM_MODEL, MNEMO_LLM_BASE_URL, MNEMO_LLM_API_KEY, MNEMO_LLM_MAX_TOKENS, MNEMO_LLM_THINKING,
+//           MNEMO_LLM_TIMEOUT_MS. Without MNEMO_LLM_PROVIDER: Claude when ANTHROPIC_API_KEY is set or the model is claude-*.
+// Fallback (optional, used while the primary is unreachable or failing): MNEMO_LLM_FALLBACK=anthropic|openai, plus
+//           MNEMO_LLM_FALLBACK_MODEL / _BASE_URL / _API_KEY / _TIMEOUT_MS. A typical setup: a local model first, Claude second.
+// Claude personal or service-account keys that are not scoped to one workspace also need MNEMO_LLM_WORKSPACE_ID.
 const ENV = process.env
-const LLM_KEY = ENV.MNEMO_LLM_API_KEY || ENV.ANTHROPIC_API_KEY || ENV.OPENAI_API_KEY || ''
-const PROVIDER = ENV.MNEMO_LLM_PROVIDER
-  || (/^claude/i.test(ENV.MNEMO_LLM_MODEL || '') || /anthropic\.com/.test(ENV.MNEMO_LLM_BASE_URL || '') || /^sk-ant-/.test(LLM_KEY) || (!ENV.MNEMO_LLM_API_KEY && !ENV.OPENAI_API_KEY && ENV.ANTHROPIC_API_KEY) ? 'anthropic' : 'openai')
-const MODEL = ENV.MNEMO_LLM_MODEL || (PROVIDER === 'anthropic' ? 'claude-haiku-5-5' : 'gpt-5.4')
-const BASE_URL = (ENV.MNEMO_LLM_BASE_URL || (PROVIDER === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1')).replace(/\/$/, '')
-const MAX_OUT = Number(ENV.MNEMO_LLM_MAX_TOKENS || (PROVIDER === 'anthropic' ? 8000 : 4000))
-// Distillation needs no up-front reasoning. Haiku 5.5 accepts thinking "disabled"; Sonnet 5.5 rejects it and takes
-// "between_tools" (no thinking before the answer when there are no tools). "default" sends nothing.
-const THINKING = ENV.MNEMO_LLM_THINKING || (/haiku/i.test(MODEL) ? 'disabled' : /sonnet-5/i.test(MODEL) ? 'between_tools' : 'default')
-
 const WORKSPACE = ENV.MNEMO_LLM_WORKSPACE_ID || ENV.ANTHROPIC_WORKSPACE_ID || ''
+const isLocal = (u) => /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/.test(u || '')
 
-export function llmConfigured() { return !!LLM_KEY }
-export function llmDescription() { return `${PROVIDER}:${MODEL}` }
+function makeBackend(provider, { model, base, key, maxTokens, thinking, timeoutMs }) {
+  const anthropic = provider === 'anthropic'
+  const m = model || (anthropic ? 'claude-haiku-5-5' : 'gpt-5.4')
+  const b = (base || (anthropic ? 'https://api.anthropic.com' : 'https://api.openai.com/v1')).replace(/\/$/, '')
+  return {
+    provider, model: m, base: b,
+    key: key || (isLocal(b) ? 'none' : anthropic ? ENV.ANTHROPIC_API_KEY : ENV.OPENAI_API_KEY) || '',  // never send a cloud key to a local server
+    maxTokens: Number(maxTokens || (anthropic ? 8000 : 6000)),
+    // Distillation needs no up-front reasoning. Haiku 5.5 accepts thinking "disabled"; Sonnet 5.5 rejects it and takes
+    // "between_tools" (no thinking before the answer when there are no tools). "default" sends nothing.
+    thinking: thinking || (/haiku/i.test(m) ? 'disabled' : /sonnet-5/i.test(m) ? 'between_tools' : 'default'),
+    timeoutMs: Number(timeoutMs || (isLocal(b) ? 600000 : 180000))
+  }
+}
+
+const primaryProvider = ENV.MNEMO_LLM_PROVIDER
+  || (/^claude/i.test(ENV.MNEMO_LLM_MODEL || '') || /anthropic\.com/.test(ENV.MNEMO_LLM_BASE_URL || '') || /^sk-ant-/.test(ENV.MNEMO_LLM_API_KEY || '')
+    || (!ENV.MNEMO_LLM_API_KEY && !ENV.MNEMO_LLM_BASE_URL && !!ENV.ANTHROPIC_API_KEY) ? 'anthropic' : 'openai')
+const PRIMARY = makeBackend(primaryProvider, {
+  model: ENV.MNEMO_LLM_MODEL, base: ENV.MNEMO_LLM_BASE_URL, key: ENV.MNEMO_LLM_API_KEY,
+  maxTokens: ENV.MNEMO_LLM_MAX_TOKENS, thinking: ENV.MNEMO_LLM_THINKING, timeoutMs: ENV.MNEMO_LLM_TIMEOUT_MS
+})
+const FALLBACK = ENV.MNEMO_LLM_FALLBACK ? makeBackend(ENV.MNEMO_LLM_FALLBACK, {
+  model: ENV.MNEMO_LLM_FALLBACK_MODEL, base: ENV.MNEMO_LLM_FALLBACK_BASE_URL, key: ENV.MNEMO_LLM_FALLBACK_API_KEY,
+  maxTokens: ENV.MNEMO_LLM_FALLBACK_MAX_TOKENS, thinking: ENV.MNEMO_LLM_FALLBACK_THINKING, timeoutMs: ENV.MNEMO_LLM_FALLBACK_TIMEOUT_MS
+}) : null
+const BACKENDS = [PRIMARY, FALLBACK].filter(b => b && b.key)
+
+export function llmConfigured() { return BACKENDS.length > 0 }
+export function llmDescription() { return BACKENDS.map(b => `${b.provider}:${b.model}`).join(' → fallback ') || 'none' }
 
 // ── Transform lock to prevent concurrent transforms on same project ──
 const _locks = new Map()
@@ -34,54 +56,72 @@ async function withLock(key, fn) {
 }
 
 // ── LLM API helper ──
-export async function callLLM(systemPrompt, userPrompt) {
-  if (!LLM_KEY) {
-    console.error('No LLM API key (MNEMO_LLM_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY) - using fallback')
-    return null
-  }
+// One request to one backend. Returns { text } or { error, down } (down: unreachable or a server-side failure).
+async function callBackend(b, systemPrompt, userPrompt) {
   try {
-    if (PROVIDER === 'anthropic') {
-      const res = await fetch(BASE_URL + '/v1/messages', {
+    if (b.provider === 'anthropic') {
+      const res = await fetch(b.base + '/v1/messages', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'authorization': `Bearer ${LLM_KEY}`, 'anthropic-version': '2023-06-01', ...(WORKSPACE ? { 'anthropic-workspace-id': WORKSPACE } : {}) },
+        headers: { 'content-type': 'application/json', 'authorization': `Bearer ${b.key}`, 'anthropic-version': '2023-06-01', ...(WORKSPACE ? { 'anthropic-workspace-id': WORKSPACE } : {}) },
         body: JSON.stringify({
-          model: MODEL,
-          max_tokens: MAX_OUT,
+          model: b.model,
+          max_tokens: b.maxTokens,
           system: systemPrompt,
           messages: [{ role: 'user', content: userPrompt }],
-          ...(THINKING !== 'default' ? { thinking: { type: THINKING } } : {})
-        })
+          ...(b.thinking !== 'default' ? { thinking: { type: b.thinking } } : {})
+        }),
+        signal: AbortSignal.timeout(b.timeoutMs)
       })
-      if (!res.ok) {
-        console.error(`Claude API error ${res.status}:`, (await res.text()).slice(0, 300))
-        return null
-      }
+      if (!res.ok) return { error: `HTTP ${res.status} ${(await res.text()).slice(0, 300)}`, down: res.status >= 500 || res.status === 429 }
       const data = await res.json()
-      return (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim() || null
+      return { text: (data.content || []).filter(x => x.type === 'text').map(x => x.text).join('').trim() }
     }
-    const res = await fetch(BASE_URL + '/chat/completions', {
+    const res = await fetch(b.base + '/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${LLM_KEY}` },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${b.key}` },
       body: JSON.stringify({
-        model: MODEL,
+        model: b.model,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
-        max_completion_tokens: MAX_OUT,
+        max_completion_tokens: b.maxTokens,
         temperature: 0.3
-      })
+      }),
+      signal: AbortSignal.timeout(b.timeoutMs)
     })
-    if (!res.ok) {
-      console.error(`LLM API error ${res.status}:`, (await res.text()).slice(0, 300))
-      return null
-    }
+    if (!res.ok) return { error: `HTTP ${res.status} ${(await res.text()).slice(0, 300)}`, down: res.status >= 500 || res.status === 429 }
     const data = await res.json()
-    return data.choices?.[0]?.message?.content?.trim() || null
+    // Local reasoning models may put their thinking inline
+    return { text: String(data.choices?.[0]?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/g, '').trim() }
   } catch (err) {
-    console.error('LLM call failed:', err.message)
+    return { error: err.message, down: true }
+  }
+}
+
+// After a primary failure, go straight to the fallback for a while instead of waiting on a dead endpoint each time
+const RETRY_PRIMARY_MS = 5 * 60 * 1000
+let primaryDownUntil = 0
+
+export async function callLLM(systemPrompt, userPrompt) {
+  if (!BACKENDS.length) {
+    console.error('No LLM configured (see the settings at the top of dikwEngine.js) - using fallback text')
     return null
   }
+  const order = BACKENDS.length > 1 && Date.now() < primaryDownUntil ? BACKENDS.slice(1) : BACKENDS
+  for (const b of order) {
+    const r = await callBackend(b, systemPrompt, userPrompt)
+    if (r.text) {
+      if (b === PRIMARY && primaryDownUntil) { primaryDownUntil = 0; console.log(`LLM: ${b.provider}:${b.model} is back`) }
+      return r.text
+    }
+    console.error(`LLM ${b.provider}:${b.model} failed: ${r.error || 'empty reply'}`)
+    if (b === PRIMARY && BACKENDS.length > 1) {
+      if (r.down) primaryDownUntil = Date.now() + RETRY_PRIMARY_MS
+      console.error(`LLM: using ${BACKENDS[1].provider}:${BACKENDS[1].model} instead`)
+    }
+  }
+  return null
 }
 
 // ── Should we transform? Ask LLM to evaluate ──

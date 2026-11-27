@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { queryTerms, snippet, makeTitle } from './text.js'
 import { generateSkillMd } from './dikwEngine.js'
 import { KB_PLATFORM } from './projectKnowledge.js'
+import { factInfo, applyDirectives } from './facts.js'
 
 const TYPE_WEIGHT = { W: 1.6, K: 1.5, I: 1.2, D: 0.6 }
 const TYPE_NAME = { D: 'Data', I: 'Information', K: 'Knowledge', W: 'Wisdom' }
@@ -22,6 +23,7 @@ Use it when:
 IMPORTANT for claude.ai chat and Cowork sessions that run in Anthropic's cloud: their transcripts are NOT captured automatically (only local Claude Code / Cowork / Codex sessions and the bots are). So in those sessions, before you finish any substantial piece of work, call record_learning once with a self-contained summary (what was asked, what was done or decided, where outputs live, open next steps), passing the Claude Project name as \`project\` and \`source: "cowork"\` or \`"claude-ai"\`. Do this without being asked; skip only trivial Q&A.
 Sessions are grouped under the user's Claude Projects (the same Projects as in the Claude app). If this conversation belongs to a Claude Project, pass that Project's name as \`project\` to get_project_context, search_memory and record_learning; list_projects shows all Projects.
 Each Claude Project's own material is stored too: its description, custom instructions, knowledge files (text and PDFs) and the Cowork project memory notes. get_project_context shows it first; search_memory searches it.
+Exact records: when the user makes a decision, a to-do is agreed, or a precise fact (date, name, number, link) is settled, save it with record_learning and one of the tags "decision", "todo" or "fact". Add the tag "expires:YYYY-MM-DD" when it stops being true on a known day. To replace an older entry add "supersedes:<id>" to the new one; when a to-do is finished save a short entry with the tag "done:<id>". Nothing is deleted: old entries stay as history and are shown marked SUPERSEDED, EXPIRED or DONE. Never present a marked entry as current. get_project_context lists open to-dos and decisions in force first; search_memory with the query "todo" or "decisions" lists them across projects.
 Memory may be stale; prefer the newest entries and confirm anything that matters.`
 
 function fmtDate(s) { return (s || '').slice(0, 10) }
@@ -41,6 +43,7 @@ export function createMemoryIndex(store) {
     for (const n of nodes) {
       n.low = (n.content || '').toLowerCase()
       n.ts = Date.parse(n.updated_at || n.created_at) || 0
+      n.fact = factInfo(n.tags)
       let p = projects.get(n.project_id)
       if (!p) { p = { id: n.project_id, name: n.project_id, counts: { D: 0, I: 0, K: 0, W: 0 }, last: '' }; projects.set(n.project_id, p) }
       p.counts[n.type] = (p.counts[n.type] || 0) + 1
@@ -124,7 +127,9 @@ export function createMemoryIndex(store) {
         const cov = terms.length ? hits / terms.length : (phraseHit ? 1 : 0)
         if (cov < minCov && !phraseHit) continue
         const ageDays = Math.max(0, (now - n.ts) / DAY)
-        const score = cov * 10 + Math.log1p(freq) + (TYPE_WEIGHT[n.type] || 1) + (phraseHit ? 3 : 0) + Math.max(0, 1 - ageDays / 180)
+        // Records no longer in force stay findable but rank below current ones; exact records in force rank a little higher
+        const standing = !n.fact ? 0 : n.fact.status !== 'active' ? -4 : n.fact.kind ? 1 : 0
+        const score = cov * 10 + Math.log1p(freq) + (TYPE_WEIGHT[n.type] || 1) + (phraseHit ? 3 : 0) + Math.max(0, 1 - ageDays / 180) + standing
         out.push({ n, score })
       }
       return out
@@ -153,6 +158,35 @@ export function createMemoryIndex(store) {
 
 const text = (t) => ({ content: [{ type: 'text', text: t }] })
 
+/** How far an entry can be trusted as current: closed or replaced records, and old status facts, are marked. */
+function standingMark(n, p) {
+  const f = n.fact
+  if (f) {
+    if (f.status === 'superseded') return ` · SUPERSEDED${f.by ? ` by ${f.by}` : ''}`
+    if (f.status === 'expired') return ` · EXPIRED ${f.expires}`
+    if (f.status === 'done') return ' · DONE'
+    return ` · ${f.kind || 'record'}${f.expires ? `, valid until ${f.expires}` : ''}`
+  }
+  const months = Math.floor((Date.now() - n.ts) / (30 * 86400000))
+  return n.type === 'I' && !p?.kb && months >= 4 ? ` · ${months} months old, verify` : ''
+}
+
+/** Exact records still in force for a set of projects: open to-dos, decisions, recorded facts. */
+function exactRecords(nodes, ids) {
+  const mine = nodes.filter(n => n.fact?.kind && ids.has(n.project_id))
+  if (!mine.length) return ''
+  const inForce = (k) => mine.filter(n => n.fact.kind === k && n.fact.status === 'active').sort((a, b) => b.ts - a.ts)
+  const line = (n) => `- (${n.id}, ${fmtDate(n.created_at)}${n.fact.expires ? `, valid until ${n.fact.expires}` : ''}) ${(n.content || '').replace(/\s+/g, ' ').slice(0, 400)}`
+  let out = ''
+  for (const [k, title, max] of [['todo', 'Open to-dos', 25], ['decision', 'Decisions in force', 20], ['fact', 'Recorded facts', 15]]) {
+    const l = inForce(k)
+    if (l.length) out += `\n## ${title} (exact records)\n${l.slice(0, max).map(line).join('\n')}\n`
+  }
+  const closed = mine.filter(n => n.fact.status !== 'active').length
+  if (closed) out += `(${closed} finished, superseded or expired records are kept as history; search_memory shows them marked.)\n`
+  return out
+}
+
 /** The Claude Project's own material: overview, custom instructions, knowledge files, Cowork memory notes. */
 function projectMaterial(nodes, kbs, rel, byTask) {
   if (!kbs.length) return ''
@@ -164,7 +198,7 @@ function projectMaterial(nodes, kbs, rel, byTask) {
   const overview = mine.filter(n => n.type === 'I' && n.project_id.startsWith('kb_'))
   const instr = mine.filter(n => n.type === 'W' && n.project_id.startsWith('kb_'))
   const docs = mine.filter(n => n.type === 'K' && n.project_id.startsWith('kb_'))
-  const mem = mine.filter(n => n.project_id.startsWith('kbmem_'))
+  const mem = mine.filter(n => (n.project_id.startsWith('kbmem_') || n.project_id.startsWith('kbnotes_')) && !n.fact)
   if (overview.length || instr.length || docs.length) {
     out += `\n## Project knowledge (from the Claude Project)\n`
     for (const n of overview) out += one(n, 2000) + '\n'
@@ -181,7 +215,7 @@ function projectMaterial(nodes, kbs, rel, byTask) {
     const index = mem.find(n => tagFile(n) === 'MEMORY.md')
     const rest = mem.filter(n => n !== index && !/\(\d+\/\d+\)\]/.test((n.content || '').split('\n')[0]) || /\(1\/\d+\)\]/.test((n.content || '').split('\n')[0]))
     const chosen = (byTask ? [...mem].sort((a, b) => rel(b) - rel(a)) : rest).filter(n => n !== index).slice(0, 12)
-    out += `\n## Project memory (Cowork notes)\n${index ? one(index, 2500) + '\n' : ''}${chosen.map(n => `- (${n.id}) ${one(n, 450).replace(/\n+/g, ' ')}`).join('\n')}\n`
+    out += `\n## Project memory and notes\n${index ? one(index, 2500) + '\n' : ''}${chosen.map(n => `- (${n.id}) ${one(n, 450).replace(/\n+/g, ' ')}`).join('\n')}\n`
   }
   return out
 }
@@ -205,10 +239,23 @@ function buildServer(store, index) {
     },
     annotations: { readOnlyHint: true }
   }, async (args) => {
+    // The bare query "todo" / "decisions" lists the exact records in force instead of ranking by keywords
+    const q = (args.query || '').trim().toLowerCase()
+    const listKind = /^(open )?(todos?|to-dos?|待办|待办事项)$/.test(q) ? 'todo' : /^(decisions?|决定|决策|已定案)$/.test(q) ? 'decision' : null
+    if (listKind) {
+      const { nodes, projects } = index.load()
+      const allowed = args.project ? new Set(index.resolveProjects(args.project).map(p => p.id)) : null
+      const list = nodes.filter(n => n.fact?.kind === listKind && n.fact.status === 'active' && (!allowed || allowed.has(n.project_id))).sort((a, b) => b.ts - a.ts)
+      if (list.length) {
+        const shown = list.slice(0, args.limit || 20)
+        return text(`${shown.length} of ${list.length} ${listKind === 'todo' ? 'open to-dos' : 'decisions in force'}${args.project ? ` for "${args.project}"` : ''}:\n` + shown.map(n =>
+          `- ${n.id} · ${fmtDate(n.created_at)}${n.fact.expires ? ` · valid until ${n.fact.expires}` : ''} · ${index.projectLabel(projects.get(n.project_id)) || n.project_id}\n  ${(n.content || '').replace(/\s+/g, ' ').slice(0, 300)}`).join('\n'))
+      }
+    }
     const { terms, results, total } = index.search(args)
     if (!results.length) return text(`No memory matched "${args.query}". Try other keywords (synonyms, English/Chinese), or recent_activity.`)
     const lines = results.map(({ node: n, project: p }) =>
-      `- [${n.type}] ${n.id} · ${fmtDate(n.created_at)} · ${index.projectLabel(p) || n.project_id}\n  ${snippet(n.content, terms)}`)
+      `- [${n.type}] ${n.id} · ${fmtDate(n.created_at)}${standingMark(n, p)} · ${index.projectLabel(p) || n.project_id}\n  ${snippet(n.content, terms)}`)
     return text(`${results.length} of ${total} matches for "${args.query}":\n${lines.join('\n')}`)
   })
 
@@ -268,7 +315,7 @@ function buildServer(store, index) {
       for (const p of projects.values()) {
         if (p.kb) {
           const r = rows.get(p.space_id)
-          if (r) { if (p.id.startsWith('kbmem_')) r.mem += p.files.size; else r.docs += p.files.size }
+          if (r) { if (p.id.startsWith('kbmem_') || p.id.startsWith('kbnotes_')) r.mem += p.files.size; else r.docs += p.files.size }
           continue
         }
         if (!nonEmpty(p) || (platform && p.platform !== platform)) continue
@@ -310,10 +357,11 @@ function buildServer(store, index) {
     const { nodes } = index.load()
     const taskTerms = task ? queryTerms(task) : []
     const rel = (n) => taskTerms.reduce((s, t) => s + (n.low.includes(t) ? 1 : 0), 0)
-    const pick = (type, max, chars) => nodes.filter(n => n.type === type && ids.has(n.project_id))
+    const pick = (type, max, chars) => nodes.filter(n => n.type === type && ids.has(n.project_id) && !n.fact)
       .sort((a, b) => (rel(b) - rel(a)) || (b.ts - a.ts)).slice(0, max)
       .map(n => `- (${n.id}, ${fmtDate(n.created_at)}) ${n.content.replace(/\s+/g, ' ').slice(0, chars)}`)
     let out = `# Context: ${sps.length ? sps.map(sp => sp.name).join(', ') + ' (Claude Project)' : project}\nSessions (${matches.length}): ${matches.length ? matches.slice(0, 15).map(p => `${index.projectLabel(p)} [${p.id}]`).join('; ') : 'none recorded'}${matches.length > 15 ? ' …' : ''}\n`
+    out += exactRecords(nodes, new Set(all.map(p => p.id)))
     out += projectMaterial(nodes, kbs, rel, taskTerms.length > 0)
     const w = pick('W', 6, 500), k = pick('K', 10, 700), i = pick('I', 10, 400)
     if (w.length) out += `\n## Wisdom\n${w.join('\n')}\n`
@@ -341,7 +389,7 @@ function buildServer(store, index) {
       `SELECT c.label, c.from_node_id AS f, c.to_node_id AS t, n2.type, substr(n2.content, 1, 160) AS s
        FROM connections c JOIN nodes n2 ON n2.id = CASE WHEN c.from_node_id = ? THEN c.to_node_id ELSE c.from_node_id END
        WHERE c.from_node_id = ? OR c.to_node_id = ? LIMIT 15`, [id, id, id])
-    let out = `[${n.type} · ${TYPE_NAME[n.type]}] ${n.id}\nProject: ${index.projectLabel(p) || n.project_id} (${n.project_id})\nSource: ${n.source_platform || '-'} · created ${n.created_at}${n.updated_at && n.updated_at !== n.created_at ? ` · updated ${n.updated_at}` : ''}\nTags: ${n.tags || '[]'}\n\n${(n.content || '').slice(0, 20000)}`
+    let out = `[${n.type} · ${TYPE_NAME[n.type]}] ${n.id}\nProject: ${index.projectLabel(p) || n.project_id} (${n.project_id})\nSource: ${n.source_platform || '-'} · created ${n.created_at}${n.updated_at && n.updated_at !== n.created_at ? ` · updated ${n.updated_at}` : ''}\nTags: ${n.tags || '[]'}${factInfo(n.tags) ? `\nStanding: ${standingMark({ ...n, fact: factInfo(n.tags), ts: 0 }, p).replace(/^ · /, '')}` : ''}\n\n${(n.content || '').slice(0, 20000)}`
     if (links.length) out += `\n\nLinked:\n` + links.map(l => `- ${l.label} ${l.f === id ? '->' : '<-'} [${l.type}] ${l.f === id ? l.t : l.f}: ${l.s.replace(/\s+/g, ' ')}`).join('\n')
     return text(out)
   })
@@ -356,8 +404,9 @@ function buildServer(store, index) {
       tags: z.array(z.string()).optional(),
       source: z.string().optional().describe('Which tool is writing, e.g. claude-ai, cowork, claude-code, codex, wxbot')
     }
-  }, async ({ content, type = 'K', project, tags = [], source }) => {
+  }, async ({ content, type, project, tags = [], source }) => {
     const now = new Date().toISOString()
+    type = type || (factInfo(JSON.stringify(tags))?.kind ? 'I' : 'K')
     let projectId
     const sps = project ? index.resolveSpaces(project) : []
     const found = project && !sps.length ? index.resolveProjects(project) : []
@@ -377,9 +426,10 @@ function buildServer(store, index) {
     store.dbRun(`INSERT INTO nodes (id, type, project_id, source_platform, content, tags, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [id, type, projectId, source || 'mcp', content, JSON.stringify(['recorded', ...tags]), now, now])
     store.dbRun('UPDATE projects SET updated_at = ? WHERE id = ?', [now, projectId])
+    const marked = applyDirectives(store, id, tags)
     store.save()
     store.broadcast({ type: 'node:added', data: { id, type, projectId, content, sourcePlatform: source || 'mcp', tags, createdAt: now } })
-    return text(`Saved ${type} ${id} under ${projectId}.`)
+    return text(`Saved ${type} ${id} under ${projectId}.${marked.length ? ' ' + marked.join('; ') + '.' : ''}`)
   })
 
   server.registerTool('export_skill', {
